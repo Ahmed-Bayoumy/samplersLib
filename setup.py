@@ -5,7 +5,7 @@ if __name__ == "__main__":
     name="samplersLib",
     author="Ahmed H. Bayoumy",
     author_email="ahmed.bayoumy@mail.mcgill.ca",
-    version='1.0.0',
+    version='24.1.1',
     packages=find_packages(include=['samplersLib', 'samplersLib.*']),
     description="A samplers library for online active sampling",
     install_requires=[
