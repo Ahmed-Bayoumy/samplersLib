@@ -162,7 +162,7 @@ class kernel(Protocol):
     for i in range(self._ns):
       ei = np.atleast_1d(np.zeros((self._points.shape[0])))
       for j in range(self._points.shape[0]):
-        z: np.ndarray = (self._points[j, :]-self.data[i, :])/(self.h if type(self).__name__ is not "Gaussian" or (1/np.linalg.det(self._cov)) <= 1E-6 else np.ones(self._nd))
+        z: np.ndarray = (self._points[j, :]-self.data[i, :])/(self.h if type(self).__name__ != "Gaussian" or (1/np.linalg.det(self._cov)) <= 1E-6 else np.ones(self._nd))
         ei[j] = self.kf_multivar(z)
       self.est_pdf += ei/self._points.shape[0]
     
