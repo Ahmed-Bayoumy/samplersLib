@@ -123,7 +123,7 @@ class LHS(sampling):
   def __init__(self, ns: int, vlim: np.ndarray):
     self.options = {}
     self.options["criterion"] = "ExactSE"
-    self.options["randomness"] = False
+    self.options["randomness"] = 10000
     self.n_s = ns
     self.varLimits = copy.deepcopy(vlim)
 
@@ -311,7 +311,7 @@ class LHS(sampling):
     return P
 
   def expand_lhs(self, x, n_points, method="basic"):
-    varLimits = self.options["varLimits"]
+    varLimits = self.options["varLimits"] if self.varLimits is None else self.varLimits
 
     new_num = len(x) + n_points
 
@@ -346,8 +346,8 @@ class LHS(sampling):
       ]
 
     # Sampling of the new subspace
-    sampling_new = LHS(varLimits=np.array([[0.0, 1.0]] * len(varLimits)))
-    x_subspace = sampling_new(n_points)
+    sampling_new = LHS(ns=n_points, vlim=np.array([[0.0, 1.0]] * len(varLimits)))
+    x_subspace = sampling_new.generate_samples()
 
     column_index = 0
     sorted_arr = x_subspace[x_subspace[:, column_index].argsort()]
@@ -367,7 +367,7 @@ class LHS(sampling):
 
     if method == "ExactSE":
       # Sampling of the new subspace
-      sampling_new = LHS(varLimits=varLimits, criterion="ExactSE")
+      sampling_new = LHS(ns=n_points, vlim=varLimits)
       x_new = sampling_new._ExactSE(
           len(x_new), len(x_new), fixed_index=np.arange(0, len(x), 1), P0=x_new
       )
@@ -601,7 +601,7 @@ class activeSampling(sampling):
       self.kernel.est_pdf = self.kernel.estimate_pdf()
     if np.any(np.isnan(self.kernel.est_pdf)):
       for i in range(len(self.kernel.est_pdf)):
-        if self.kernel.est_pdf[i] == np.nan:
+        if np.isnan(self.kernel.est_pdf[i]):
           self.kernel.est_pdf[i] = 0
       if sum(self.kernel.est_pdf) <= 0:
         self.kernel.est_pdf = np.atleast_1d([1/len(self.kernel.est_pdf)]*len(self.kernel.est_pdf))
@@ -609,7 +609,7 @@ class activeSampling(sampling):
         self.kernel.est_pdf /= sum(self.kernel.est_pdf)
     
     random_state = np.random.RandomState(seed)
-    if type(self.kernel).__name__ == "Gaussian":
+    if type(self.kernel).__name__ == "Gaussian" and self.kernel._cov is not None:
       normDist = np.transpose(random_state.multivariate_normal(
           np.zeros((self.n_d,), float), self.kernel._cov, size=size
       ))

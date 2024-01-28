@@ -118,26 +118,32 @@ class kernel(Protocol):
   
   def _calc_covariance(self):
     """ Computes the covariance matrix for each kernel using the kernel BW (covariance factor). """
-    self._factor = self._covariance_factor()
+    try:
+      self._factor = self._covariance_factor()
 
-    if self._data_inv_cov == None:
-      if self.weights is None:
-        self.weights = np.ones(self._ns)/self._ns
-      self._data_cov = np.atleast_2d(np.cov(self.data.T, 
-                                                   rowvar=1, 
-                                                   bias=True, 
-                                                   aweights=self.weights))
-      self._data_inv_cov = np.linalg.inv(self._data_cov)
-    
-    self._cov = self._data_cov * self._factor**2
-    self.is_debugging = False
-    if self.is_debugging:
-      labs = [f'x{i}' for i in range(self._nd)]
-      sns.heatmap(self._cov, annot=True, fmt='g', xticklabels=labs, yticklabels=labs)
-      plt.show()
-    self._inv_cov = self._data_inv_cov / self._factor**2
-    # L = np.linalg.cholesky(self._cov*2*np.pi)
-    # self._log_det = 2*np.log(np.diag(L)).sum()
+      if self._data_inv_cov == None:
+        if self.weights is None:
+          self.weights = np.ones(self._ns)/self._ns
+        self._data_cov = np.atleast_2d(np.cov(self.data.T, 
+                                                    rowvar=1, 
+                                                    bias=True, 
+                                                    aweights=self.weights))
+        self._data_inv_cov = np.linalg.inv(self._data_cov)
+      
+      self._cov = self._data_cov * self._factor**2
+      self.is_debugging = False
+      if self.is_debugging:
+        labs = [f'x{i}' for i in range(self._nd)]
+        sns.heatmap(self._cov, annot=True, fmt='g', xticklabels=labs, yticklabels=labs)
+        plt.show()
+      self._inv_cov = self._data_inv_cov / self._factor**2
+      # L = np.linalg.cholesky(self._cov*2*np.pi)
+      # self._log_det = 2*np.log(np.diag(L)).sum()
+    except:
+      self._data_cov = None
+      self._data_inv_cov = None
+      self._cov = None
+      self._inv_cov = None
 
   def kf_univar(self):
     ...
@@ -162,7 +168,7 @@ class kernel(Protocol):
     for i in range(self._ns):
       ei = np.atleast_1d(np.zeros((self._points.shape[0])))
       for j in range(self._points.shape[0]):
-        z: np.ndarray = (self._points[j, :]-self.data[i, :])/(self.h if type(self).__name__ != "Gaussian" or (1/np.linalg.det(self._cov)) <= 1E-6 else np.ones(self._nd))
+        z: np.ndarray = (self._points[j, :]-self.data[i, :])/(self.h if type(self).__name__ is not "Gaussian" or self._cov is None or (1/np.linalg.det(self._cov)) <= 1E-6 else np.ones(self._nd))
         ei[j] = self.kf_multivar(z)
       self.est_pdf += ei/self._points.shape[0]
     
@@ -194,7 +200,7 @@ class Gaussian(kernel):
     return 1 / np.sqrt(2 * np.pi) * np.exp(-1 / 2 * u * u)
   
   def kf_multivar(self, z: np.ndarray):
-    if (1/np.linalg.det(self._cov)) > 1E-6 and np.linalg.det(self._cov) > 1E-6:
+    if self._cov is not None and (1/np.linalg.det(self._cov)) > 1E-6 and np.linalg.det(self._cov) > 1E-6:
       return (1.0 / (np.sqrt((2 * np.pi)**self._nd * np.linalg.det(self._cov))) * np.exp(-(np.linalg.solve(self._cov, z).T.dot(z)) / 2))
     else:
       return np.prod(1 / np.sqrt(2 * np.pi) * np.exp(-1 / 2 * z * z))/np.prod(self.h)
