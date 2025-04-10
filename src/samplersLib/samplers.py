@@ -1,13 +1,15 @@
+import math
 from typing import Dict, Any, Protocol, List
 import copy
 from dataclasses import dataclass
 from pyDOE2 import lhs
 import numpy as np
 from scipy.spatial.distance import cdist, pdist
-from .kernels import kernel as KERNEL, Gaussian, Epanechnikov, cosine, linear, uniformRectangular, triweight, tricube, Silverman, Sigmoid, biweight, logistic
+from .kernels import kernel as KERNEL, Gaussian, Epanechnikov, cosine, linear, uniformRectangular, triweight, tricube, Silverman, Sigmoid, biweight, logistic, Laplace, Gaussian_RBF, Multiquadric_RBF, InverseMultiquadric_RBF, ThinPlateSpline_RBF
 from ._common import *
 from scipy import stats
-
+from .particle import Particle
+from .importance import RandomForest as RF
 @dataclass
 class CustomMultivariateNormal:
   def __init__(self, mean, covariance, seed):
@@ -71,27 +73,27 @@ class CustomMultivariateNormal:
 
       
   def pdf(self, x):
-      x = np.array(x)
-      if x.shape[0] != self.dim:
-          raise ValueError(f"Input dimension must be {self.dim}")
+    x = np.array(x)
+    if x.shape[0] != self.dim:
+        raise ValueError(f"Input dimension must be {self.dim}")
 
-      # Compute the Mahalanobis distance
-      delta = x - self.mean
-      mahalanobis_distance = np.dot(np.dot(delta.T, self.inv_cov), delta)
-      
-      return self.norm_const * np.exp(-0.5 * mahalanobis_distance)
+    # Compute the Mahalanobis distance
+    delta = x - self.mean
+    mahalanobis_distance = np.dot(np.dot(delta.T, self.inv_cov), delta)
+    
+    return self.norm_const * np.exp(-0.5 * mahalanobis_distance)
   
   def sample(self, num_samples=1):
-      samples = np.random.normal(size=(num_samples, self.dim))
-      if self.dec_method != "eigh":
-        return np.dot(samples, self.L.T) + self.mean
-      else:
-        try:
-          return np.dot(samples, self.L) + self.mean
-        except:
-          rg = np.random
-          random_state = np.random.Generator(rg.PCG64DXSM(seed=self.seed)) 
-          return stats.multivariate_normal(mean=self.mean, cov=self.covariance, allow_singular=True, seed=self.seed)
+    samples = np.random.normal(size=(num_samples, self.dim))
+    if self.dec_method != "eigh":
+      return np.dot(samples, self.L.T) + self.mean
+    else:
+      try:
+        return np.dot(samples, self.L) + self.mean
+      except:
+        rg = np.random
+        random_state = np.random.Generator(rg.PCG64DXSM(seed=self.seed)) 
+        return stats.multivariate_normal(mean=self.mean, cov=self.covariance, allow_singular=True, seed=self.seed)
 
 @dataclass
 class sampling(Protocol):
@@ -615,8 +617,58 @@ class halton(sampling):
     pass
 
 @dataclass
+class reducers:
+  data: np.ndarray = None
+  data_reduced: np.ndarray = None
+  data_standardized: np.ndarray = None
+  varLimits: np.ndarray = None
+  n_d: int = 0
+
+  def __init__(self, data:np.ndarray, vlim: np.ndarray, nd: int):
+    self.data = copy.deepcopy(data)
+    self.varLimits = copy.deepcopy(vlim)
+    self.n_d = nd
+    # Compute the covariance matrix
+    self.standardizeData()
+
+  def standardizeData(self):
+    self.data_scaled = (self.data - self.varLimits[:,0]) / (self.varLimits[:,1] - self.varLimits[:,0])
+    self.means = np.mean(self.data_scaled, axis=0)
+    self.std_devs = np.std(self.data_scaled, axis=0)
+    self.data_standardized = (self.data_scaled - self.means)/ self.std_devs
+    nan_indices = np.isnan(self.data_standardized)
+    col_means = np.random.normal(0, 1e-5, size=self.n_d)
+    self.data_standardized[nan_indices] = np.take(col_means, np.where(nan_indices)[1])
+
+  
+  def rd(self):
+    # Compute the covariance matrix
+    self.standardizeData()
+    cov_matrix = np.cov(self.data_standardized, rowvar=False)
+
+    # Compute eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+
+    # Sort eigenvalues in descending order, and rearrange the eigenvectors accordingly
+    sorted_indices = np.argsort(eigenvalues)[::-1]
+    eigenvalues_sorted = eigenvalues[sorted_indices]
+    eigenvectors_sorted = eigenvectors[:, sorted_indices]
+
+    # Select the top 'k' eigenvectors to form the new matrix
+    self.k = 3  # Number of principal components we want (reduce to 3D)
+    self.eigenvectors_top_k = eigenvectors_sorted[:, :self.k]
+
+    # Project the original data onto the new space
+    self.data_reduced = np.dot(self.data_standardized, self.eigenvectors_top_k)
+
+  def project_rd_to_original_space(self, samples: np.ndarray):
+    return samples.dot((self.eigenvectors_top_k[:, :self.k].T) + self.means)
+
+
+
+@dataclass
 class activeSampling(sampling):
-  kernel: KERNEL = None
+  kernel: List[KERNEL] = None
   n_r: int = 0
   data: np.ndarray = None
   resampled_data: np.ndarray = None
@@ -626,8 +678,11 @@ class activeSampling(sampling):
   _msgs: List[List[str]] = None
   _ne: int = 0
   _cov_decomp: str = 'svd'
+  reducer: reducers = None
+  data_reduced: np.ndarray = None
+  data_standardized: np.ndarray = None
   
-  def __init__(self, data: np.ndarray, n_r: int, vlim: np.ndarray, kernel_type: str = "Gaussian", bw_method = TUNING_METHOD.SCOTT.name, seed: int = 10000, weights: Any = None):
+  def __init__(self, data: np.ndarray, n_r: int, vlim: np.ndarray, kernel_type: List[str] = ["Gaussian"], bw_method = TUNING_METHOD.SCOTT.name, seed: int = 10000, weights: Any = None):
     self.data = np.atleast_2d(np.asarray(data))
     self._msgs = []
     if self.data.size <= 1:
@@ -650,55 +705,126 @@ class activeSampling(sampling):
     self.seed = seed
     self.varLimits = copy.deepcopy(vlim)
     self.data_normalized = self.data / (vlim[:, 1] - vlim[:, 0])
-
-    if kernel_type == "linear" or kernel_type == "triangular":
-      self.kernel = linear(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "Gaussian":
-      self.kernel = Gaussian(data=data, vlim=vlim, weights=self._weights, bw_method=bw_method, n_r=self.n_r)
-    elif kernel_type == "Epanechnikov":
-      self.kernel = Epanechnikov(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "cosine":
-      self.kernel = cosine(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "uniformRectangular":
-      self.kernel = uniformRectangular(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "triweight":
-      self.kernel = triweight(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "tricube":
-      self.kernel = tricube(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "Silverman":
-      self.kernel = Silverman(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "Sigmoid":
-      self.kernel = Sigmoid(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "biweight":
-      self.kernel = biweight(data=self.data, weights=self._weights, bw_method=bw_method)
-    elif kernel_type == "logistic":
-      self.kernel = logistic(data=self.data, weights=self._weights, bw_method=bw_method)
+    if self.n_d > 3:
+      self.reducer = reducers(data=data, vlim=self.varLimits, nd=self.n_d)
+      self.reducer.rd()
+      data = self.reducer.data_reduced
     else:
-      self._msgs([1, "Unknown kernel type. Switched to the default Gaussian kernel."])
-      self.kernel = Gaussian(data=self.data, weights=self._weights, bw_method=bw_method)
+      data = self.data
+    self.kernel = []
+    for k in kernel_type:
+      if k == "linear" or k == "triangular":
+        self.kernel.append(linear(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "Gaussian":
+        self.kernel.append(Gaussian(data=data, vlim=vlim, weights=self._weights, bw_method=bw_method, n_r=self.n_r))
+      elif k == "Epanechnikov":
+        self.kernel.append(Epanechnikov(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "cosine":
+        self.kernel.append(cosine(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "uniformRectangular":
+        self.kernel.append(uniformRectangular(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "triweight":
+        self.kernel.append(triweight(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "tricube":
+        self.kernel.append(tricube(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "Silverman":
+        self.kernel.append(Silverman(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "Sigmoid":
+        self.kernel.append(Sigmoid(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "biweight":
+        self.kernel.append(biweight(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "logistic":
+        self.kernel.append(logistic(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "Laplace":
+        self.kernel.append(Laplace(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "Gaussian_RBF":
+        self.kernel.append(Gaussian_RBF(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "Multiquadric_RBF":
+        self.kernel.append(Multiquadric_RBF(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "InverseMultiquadric_RBF":
+        self.kernel.append(InverseMultiquadric_RBF(data=data, weights=self._weights, bw_method=bw_method))
+      elif k == "ThinPlateSpline_RBF":
+        self.kernel.append(ThinPlateSpline_RBF(data=data, weights=self._weights, bw_method=bw_method))
+      else:
+        self._msgs.append([1, "Unknown kernel type. Switched to the default Gaussian kernel."])
+        self.kernel.append(Gaussian(data=data, weights=self._weights, bw_method=bw_method))
+  
+  def standardizeData(self):
+    self.data_scaled = (self.data - self.varLimits[:,0]) / (self.varLimits[:,1] - self.varLimits[:,0])
+    self.means = np.mean(self.data_scaled, axis=0)
+    self.std_devs = np.std(self.data_scaled, axis=0)
+    self.data_standardized = (self.data_scaled - self.means)/ self.std_devs
+    nan_indices = np.isnan(self.data_standardized)
+    col_means = np.random.normal(0, 1e-5, size=self.n_d)
+    self.data_standardized[nan_indices] = np.take(col_means, np.where(nan_indices)[1])
+
+  
+  def rd(self):
+    # Compute the covariance matrix
+    self.standardizeData()
+    cov_matrix = np.cov(self.data_standardized, rowvar=False)
+
+    # Compute eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+
+    # Sort eigenvalues in descending order, and rearrange the eigenvectors accordingly
+    sorted_indices = np.argsort(eigenvalues)[::-1]
+    eigenvalues_sorted = eigenvalues[sorted_indices]
+    eigenvectors_sorted = eigenvectors[:, sorted_indices]
+
+    # Select the top 'k' eigenvectors to form the new matrix
+    self.k = 3  # Number of principal components we want (reduce to 3D)
+    self.eigenvectors_top_k = eigenvectors_sorted[:, :self.k]
+
+    # Project the original data onto the new space
+    self.data_reduced = np.dot(self.data_standardized, self.eigenvectors_top_k)
+
+  def project_rd_to_original_space(self, samples: np.ndarray):
+    return samples.dot((self.eigenvectors_top_k[:, :self.k].T) + self.means)
+
 
   def resample(self, size=None, seed=None):
-    if size is None:
-      size = int(self.kernel._ne)
+    for i in range(len(self.kernel)):
+      if size is None:
+        size = int(self.kernel[i]._ne)
+      
+      if size >self.kernel[i]._points.shape[0]:
+        size = self.kernel[i]._points.shape[0]
+      
+      if self.kernel[i].est_pdf is None:
+        self.kernel[i].est_pdf = self.kernel[i].estimate_pdf()
+      if np.any(np.isnan(self.kernel[i].est_pdf)):
+        for j in range(len(self.kernel[i].est_pdf)):
+          if np.isnan(self.kernel[i].est_pdf[j]):
+            self.kernel[i].est_pdf[j] = 0
+        if sum(self.kernel[i].est_pdf) <= 0:
+          self.kernel[i].est_pdf = np.atleast_1d([1/len(self.kernel[i].est_pdf)]*len(self.kernel[i].est_pdf))
+        else:
+          self.kernel[i].est_pdf /= sum(self.kernel[i].est_pdf)
     
-    if size >self.kernel._points.shape[0]:
-      size = self.kernel._points.shape[0]
-    
-    if self.kernel.est_pdf is None:
-      self.kernel.est_pdf = self.kernel.estimate_pdf()
-    if np.any(np.isnan(self.kernel.est_pdf)):
-      for i in range(len(self.kernel.est_pdf)):
-        if np.isnan(self.kernel.est_pdf[i]):
-          self.kernel.est_pdf[i] = 0
-      if sum(self.kernel.est_pdf) <= 0:
-        self.kernel.est_pdf = np.atleast_1d([1/len(self.kernel.est_pdf)]*len(self.kernel.est_pdf))
-      else:
-        self.kernel.est_pdf /= sum(self.kernel.est_pdf)
-    rg = np.random
-    random_state = np.random.Generator(rg.PCG64DXSM(seed=seed)) 
-    if type(self.kernel).__name__ == "Gaussian" and self.kernel._cov is not None:
-      MVN = CustomMultivariateNormal(np.zeros((self.n_d,), np.float64), self.kernel._cov, seed)
-      normDist = MVN.sample(size)
+    densities = [k.est_pdf for k in self.kernel]
+
+    # Average the densities for sampling
+    combined_density = np.mean(densities, axis=0)
+
+    # Normalize the combined density
+    combined_density /= np.sum(combined_density)
+
+    # Sample from the combined density
+    sampled_indices = np.random.choice(self.kernel[0]._points.shape[0], size=size, p=combined_density)
+    if self.n_d <= 3:
+      return self.kernel[0]._points[sampled_indices]
+    else:
+      x_resampled = self.reducer.project_rd_to_original_space(samples=self.kernel[0]._points[sampled_indices])
+      x_resampled_clipped = np.clip(x_resampled, 0, 1)
+      x_resampled_original = x_resampled_clipped * (self.varLimits[:,1] - self.varLimits[:,0]) + self.varLimits[:, 0]
+      return x_resampled_original
+
+    # rg = np.random
+    # random_state = np.random.Generator(rg.PCG64DXSM(seed=seed)) 
+    # if type(self.kernel[i]).__name__ == "Gaussian" and self.kernel[i]._cov is not None:
+    #   MVN = CustomMultivariateNormal(np.zeros((self.n_d,), np.float64), self.kernel[i]._cov, seed)
+    #   normDist = MVN.sample(size)
     # The following numpy bug shows a high risk that multivariate_normal gives different results when numpy linear algebra solvers 
     # get updated (mainly matrix factorization and decomposition methods) and/or when the bitgenerators that control sources 
     # of randomization have new update which is less likely to happen than the former.
@@ -706,32 +832,366 @@ class activeSampling(sampling):
     # distribution given a covariance matrix and mean values. So customed methods are developed here starting from release no. 2408
     # https://github.com/numpy/numpy/issues/22975
     # random_state = np.random.RandomState(seed)
-    # if type(self.kernel).__name__ == "Gaussian" and self.kernel._cov is not None:
+    # if type(self.kernel[i]).__name__ == "Gaussian" and self.kernel[i]._cov is not None:
     #   normDist = np.transpose(random_state.multivariate_normal(
-    #       np.zeros((self.n_d,), float), self.kernel._cov, size=size
+    #       np.zeros((self.n_d,), float), self.kernel[i]._cov, size=size
     #   ))
-      indices = random_state.choice(self.kernel._points.shape[0], size=size, p=self.kernel.est_pdf)
-      means = self.data[indices, :]
-      if isinstance(normDist, stats._multivariate.multivariate_normal_frozen):
-        new = means + normDist.rvs(size=size, random_state=random_state)
-    #   ))
-      else:
-        new = means + normDist
-    else:
-      indices1 = random_state.choice(self.kernel.data.shape[0], size=size)
-      indices2 = random_state.choice(self.kernel._points.shape[0], size=size, p=abs(self.kernel.est_pdf))
-      means1 = self.data[indices1, :]
-      means2 = self.kernel._points[indices2, :]
-      new = (means1 + means2)/2
+    #   indices = random_state.choice(self.kernel._points.shape[0], size=size, p=self.kernel.est_pdf)
+    #   means = self.data[indices, :]
+    #   if isinstance(normDist, stats._multivariate.multivariate_normal_frozen):
+    #     new = means + normDist.rvs(size=size, random_state=random_state)
+    # #   ))
+    #   else:
+    #     new = means + normDist
+    # else:
+    #   indices1 = random_state.choice(self.kernel.data.shape[0], size=size)
+    #   indices2 = random_state.choice(self.kernel._points.shape[0], size=size, p=abs(self.kernel.est_pdf))
+    #   means1 = self.data[indices1, :]
+    #   means2 = self.kernel._points[indices2, :]
+    #   new = (means1 + means2)/2
     
-    omit = []
-    for i in range(size):
-      for j in range(self.n_d):
-        if new[i,j] < self.varLimits[j, 0] or new[i,j] > self.varLimits[j, 1]:
-          omit.append(i)
+    # omit = []
+    # for i in range(size):
+    #   for j in range(self.n_d):
+    #     if new[i,j] < self.varLimits[j, 0] or new[i,j] > self.varLimits[j, 1]:
+    #       omit.append(i)
     
-    return np.delete(new, omit, axis=0)
+    # return np.delete(new, omit, axis=0)
 
+@dataclass
+class TunablePSS(sampling):
+  data: np.ndarray = None
+  n_d: int = 0
+  n_s: int = 0
+  _weights: Any = None
+  _msgs: List[List[str]] = None
+  _ne: int = 0
+  _cov_decomp: str = 'svd'
+  num_particles: int = 100
+  max_iter: int = 100
+  inertia_weight: int = 0.1
+  cognitive_weight: int = 1
+  social_weight: int = 1
+  selector: List[RF] = None
+  it:int = 10000
+  x_incumbent: np.ndarray = None
+  
+  
+  def __init__(self, data: np.ndarray, y: np.ndarray, x_inc: np.ndarray, it:int, vlim: np.ndarray, num_particles=100, max_iter=100, inertia_weight: int = 0.1, cognitive_weight: int = 1, social_weight: int = 1, seed: int = 10000, weights: Any = None):
+    self._msgs = []
+    self.it = it
+    self.data = copy.deepcopy(data)
+    self.x_incumbent = copy.deepcopy(x_inc)
+    if self.data.size <= 1:
+      self._msgs.append([2, "`data` passed in to the `activeSampling` constructor should include multiple sample points."])
+      raise ValueError("`data` passed in to the `activeSampling` constructor should include multiple sample points.")
+    self.selector = [RF(n_estimators=10, max_depth=3)] * y.shape[1]
+
+    for i in range(y.shape[1]):
+      self.selector[i].fit(data,y[:,i])
+      if i == 0:
+        weights = self.selector[i].get_feature_importance(data,y[:,i])
+      else:
+        weights += self.selector[i].get_feature_importance(data,y[:,i])
+
+    self.n_s, self.n_d = self.data.shape
+    if weights is not None:
+      self._weights = np.atleast_1d(weights).astype(float)
+      self._weights /= sum(self._weights) if sum(self._weights) > 0 else 1
+      if not self._weights.ndim == 1:
+        self._msgs.append([2, "`weights` passed in to the `activeSampling` constructor should be on-diemsional vector."])
+      # if not len(self._weights) == self.n_s:
+      #   self._msgs.append([2, "`weights` passed in to the `activeSampling` constructor should have the same size of the input `data` array."])
+      #   raise ValueError("`weights` passed in to the `activeSampling` constructor should have the same size of the input `data` array.")
+      self._ne = 1/sum(self._weights**2)
+    
+    self.seed = seed
+    self.varLimits = [[],[]]
+    for v in vlim:
+      self.varLimits[0].append(v[0])
+      self.varLimits[1].append(v[1])
+    self.varLimits = np.array(self.varLimits)
+    self.data_normalized = self.data / (vlim[:,1] - vlim[:,0])
+    self.num_particles = num_particles
+    self.max_iter = max_iter
+    self.inertia_weight = inertia_weight
+    self.social_weight = social_weight
+    self.cognitive_weight = cognitive_weight
+
+  def target_distribution(self, x):
+    """Multivariate Gaussian distribution."""
+    mean = np.zeros(x.shape[0])  # Mean at the origin
+    cov = np.eye(x.shape[0])  # Identity covariance matrix (standard normal)
+    exponent = -0.5 * np.dot((x - mean), np.dot(np.linalg.inv(cov), (x - mean)))
+    return (1 / np.sqrt((2 * np.pi)**len(x) * np.linalg.det(cov))) * np.exp(exponent)
+
+  def particle_swarm_sampling(self, size):
+    particles = [Particle(bounds=self.varLimits, pos=self.data[i] if i < len(self.data) else None) for i in range(self.num_particles)]
+    global_best_position = None
+    global_best_value = float('-inf')
+
+    samples = []
+
+    for _ in range(self.max_iter):
+      for particle in particles:
+        particle.evaluate(self.target_distribution)
+        if particle.best_value > global_best_value:
+          global_best_value = particle.best_value
+          global_best_position = particle.best_position
+
+      for particle in particles:
+        particle.update_velocity(global_best_position, self.inertia_weight, self.cognitive_weight, self.social_weight)
+        particle.update_position(self.varLimits)
+
+      # Store the current positions as samples
+      samples.extend([particle.position for particle in particles])
+    
+    for i in range(len(samples)):
+      for j in range(len(samples[i])):
+        if samples[i][j] < self.varLimits[0, j]:
+          samples[i][j] = self.varLimits[0, j]
+        if samples[i][j] > self.varLimits[1, j]:
+          samples[i][j] = self.varLimits[1, j]
+
+    return np.array(samples[:size])
+  
+  def resample(self, size=None, seed=None):
+    # Run Multivariate Particle Swarm Sampling
+    self.seed = copy.deepcopy(seed)
+    samples = self.particle_swarm_sampling(size)
+    
+    res = self.resample_multidimensional_variables(variables=samples, dimension_weights=self._weights, num_samples=size) if sum(self._weights) > 0 else samples
+    # self.plotting(res)
+    return res
+  
+  def plotting(self, data):
+    # import numpy as np
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    # Generate random data for 10-dimensional parameters (100 samples)
+    num_dimensions = len(data[0])
+
+    # Convert the data into a DataFrame for better handling with seaborn
+    df = pd.DataFrame(data, columns=[f"x{i+1}" for i in range(num_dimensions)])
+
+    # Create a pair plot (scatter plot matrix)
+    sns.pairplot(df, height=2.5)
+
+    # Show the plot
+    plt.suptitle(f"Pairwise Scatter Plot Matrix of {num_dimensions} Dimensions", y=1.02)
+    plt.show()
+
+
+  def resample_multidimensional_variables(self, variables, dimension_weights, num_samples):
+    """
+    Randomly resamples multidimensional variables based on the importance weight of each dimension.
+    
+    Parameters:
+    - variables: A 2D numpy array (N x D), where N is the number of variables and D is the number of dimensions.
+    - dimension_weights: A 1D numpy array of shape (D,), representing the importance of each dimension.
+    - num_samples: The number of variables to sample.
+    
+    Returns:
+    - A numpy array of shape (num_samples, D) containing the resampled variables.
+    """
+    # Normalize the importance weights for each dimension
+    normalized_weights = dimension_weights / np.sum(dimension_weights)
+    
+    # Get the number of variables (N) and number of dimensions (D)
+    num_variables, num_dimensions = variables.shape
+    
+    # Initialize an array to hold the resampled variables
+    # COMPLETED: We need to reuse the current incumbent as a baseline for resampling
+    resampled_variables = np.tile(self.x_incumbent, (num_samples, 1))
+    
+    # For each dimension, we will sample based on the normalized importance weights
+    for d in range(num_dimensions):
+      # Calculate the cumulative distribution for the current dimension's weights
+      cumulative_weights = np.cumsum(normalized_weights)
+      
+      # For each sample, generate a random number and map it to the corresponding index
+      for i in range(num_samples):
+        # Generate a random number between 0 and 1
+        rd = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(self.it+i)))
+        rand_value = rd.rand()
+        
+        # Find the index where this random value fits within the cumulative distribution
+        # This gives the index for the variable from which we'll sample the value for this dimension
+        sample_index = np.searchsorted(cumulative_weights, rand_value)
+        
+        # Assign the corresponding value for this dimension
+        resampled_variables[i, sample_index] = variables[i, d]
+    
+    return np.unique(resampled_variables, axis=0)
+@dataclass
+class TunableSA(sampling):
+  n_r: int = 0
+  data: np.ndarray = None
+  n_d: int = 0
+  n_s: int = 0
+  _weights: Any = None
+  _msgs: List[List[str]] = None
+  _ne: int = 0
+  initial_temp: int = 100
+  cooling_rate: float = 0.99
+  max_iter: int = 10000
+  it: int = 10000
+
+  def __init__(self, data: np.ndarray, y: np.ndarray, x_inc: np.ndarray, it: int, vlim: np.ndarray, initial_temp=100, cooling_rate=0.99, max_iter=100, seed: int = 10000, weights: Any = None):
+    self._msgs = []
+    rs = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(it+1)))
+    self.it = it
+    self.data = copy.deepcopy(x_inc)
+    self.x_incumbent = copy.deepcopy(x_inc)
+
+    self.selector = [RF(n_estimators=10, max_depth=3)] * y.shape[1]
+
+    for i in range(y.shape[1]):
+      self.selector[i].fit(data,y[:,i])
+      if i == 0:
+        weights = self.selector[i].get_feature_importance(data,y[:,i])
+      else:
+        weights += self.selector[i].get_feature_importance(data,y[:,i])
+    self.n_s, self.n_d = data.shape
+    if weights is not None:
+      self._weights = np.atleast_1d(weights).astype(float)
+      self._weights /= sum(self._weights) if sum(self._weights) > 0 else 1
+      if not self._weights.ndim == 1:
+        self._msgs.append([2, "`weights` passed in to the `activeSampling` constructor should be on-diemsional vector."])
+      # if not len(self._weights) == self.n_s:
+      #   self._msgs.append([2, "`weights` passed in to the `activeSampling` constructor should have the same size of the input `data` array."])
+      #   raise ValueError("`weights` passed in to the `activeSampling` constructor should have the same size of the input `data` array.")
+      self._ne = 1/sum(self._weights**2)
+    
+    self.seed = seed
+    self.varLimits = [[],[]]
+    for v in vlim:
+      self.varLimits[0].append(v[0])
+      self.varLimits[1].append(v[1])
+    self.varLimits = np.array(self.varLimits)
+    self.data_normalized = self.data / (vlim[:,1] - vlim[:,0])
+    self.initial_temp = initial_temp
+    self.cooling_rate = cooling_rate
+    self.max_iter = max_iter
+
+  def target_distribution(self, x):
+    """Multivariate Gaussian distribution."""
+    mean = np.zeros(x.shape[0])  # Mean at the origin
+    cov = np.eye(x.shape[0])     # Identity covariance matrix (standard normal)
+    return (1 / np.sqrt((2 * np.pi)**len(x) * np.linalg.det(cov))) * np.exp(-0.5 * np.dot((x - mean), np.dot(np.linalg.inv(cov), (x - mean))))
+
+  def get_neighbor(self,current_point, step_size=0.1):
+    # Perturb each dimension by a small random amount
+    return [x + np.random.uniform(-step_size, step_size) for x in current_point]
+    
+  def acceptance_probability(self, temperature):
+    # Accept with a probability that decreases as temperature lowers.
+    return np.random.random() < math.exp(-1 / temperature)  # Example: random acceptance, depending on temperature
+
+  def simulated_annealing_sampling(self, size):
+    current_point = self.x_incumbent
+    samples = [current_point]
+    
+    # Start with an initial temperature
+    temperature = self.initial_temp
+    
+    # Sampling loop: perform for num_samples iterations
+    for _ in range(self.n_s):
+      # Generate a neighboring sample by perturbing each dimension
+      neighbor_point = self.get_neighbor(current_point, min(self.varLimits[1]-self.varLimits[0])/10)
+      
+      # Accept or reject the new point based on the acceptance criterion
+      if self.acceptance_probability(temperature):
+        current_point = neighbor_point
+      
+      # Store the accepted sample
+      samples.append(current_point)
+      
+      # Cool down the temperature
+      temperature *= self.cooling_rate
+
+    spoints = [s*(self.varLimits[1,:] - self.varLimits[0,:])-self.varLimits[0,:] for s in samples]
+    for i in range(len(spoints)):
+      for j in range(len(spoints[i])):
+        if spoints[i][j] < self.varLimits[0, j]:
+          spoints[i][j] = self.varLimits[0, j]
+        if spoints[i][j] > self.varLimits[1, j]:
+          spoints[i][j] = self.varLimits[1, j]
+    return np.array(spoints[:size] if len(spoints)>size else spoints)
+
+
+  def resample(self, size=None, seed=None):
+    # Run Multivariate Particle Swarm Sampling
+    self.seed = copy.deepcopy(seed)
+    samples = self.simulated_annealing_sampling(size)
+
+    res = self.resample_multidimensional_variables(variables=samples, dimension_weights=self._weights, num_samples=size) if sum(self._weights) > 0 else samples
+    # self.plotting(res)
+    return res
+  
+  def plotting(self, data):
+    # import numpy as np
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    # Generate random data for 10-dimensional parameters (100 samples)
+    num_dimensions = len(data[0])
+
+    # Convert the data into a DataFrame for better handling with seaborn
+    df = pd.DataFrame(data, columns=[f"x{i+1}" for i in range(num_dimensions)])
+
+    # Create a pair plot (scatter plot matrix)
+    sns.pairplot(df, height=2.5)
+
+    # Show the plot
+    plt.suptitle(f"Pairwise Scatter Plot Matrix of {num_dimensions} Dimensions", y=1.02)
+    plt.show()
+
+
+  def resample_multidimensional_variables(self, variables, dimension_weights, num_samples):
+    """
+    Randomly resamples multidimensional variables based on the importance weight of each dimension.
+    
+    Parameters:
+    - variables: A 2D numpy array (N x D), where N is the number of variables and D is the number of dimensions.
+    - dimension_weights: A 1D numpy array of shape (D,), representing the importance of each dimension.
+    - num_samples: The number of variables to sample.
+    
+    Returns:
+    - A numpy array of shape (num_samples, D) containing the resampled variables.
+    """
+    # Normalize the importance weights for each dimension
+    normalized_weights = dimension_weights / np.sum(dimension_weights)
+    
+    # Get the number of variables (N) and number of dimensions (D)
+    num_variables, num_dimensions = variables.shape
+    
+    # Initialize an array to hold the resampled variables
+    # COMPLETED: We need to reuse the current incumbent as a baseline for resampling
+    resampled_variables = np.tile(self.x_incumbent, (num_samples, 1))
+    
+    # For each dimension, we will sample based on the normalized importance weights
+    for d in range(num_dimensions):
+      # Calculate the cumulative distribution for the current dimension's weights
+      cumulative_weights = np.cumsum(normalized_weights)
+      
+      # For each sample, generate a random number and map it to the corresponding index
+      for i in range(len(variables)):
+        # Generate a random number between 0 and 1
+        rd = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(self.it+i)))
+        rand_value = rd.rand()
+        
+        # Find the index where this random value fits within the cumulative distribution
+        # This gives the index for the variable from which we'll sample the value for this dimension
+        sample_index = np.searchsorted(cumulative_weights, rand_value)
+        
+        # Assign the corresponding value for this dimension
+        resampled_variables[i, sample_index] = variables[i, d]
+    
+    return np.unique(resampled_variables, axis=0)
 
 if __name__ == "__main__":
   """ Samplers library """

@@ -15,6 +15,10 @@ class SAMPLING_METHOD(Enum):
   RS: int = auto()
   HALTON: int = auto()
 
+class KERNEL_TYPE(Enum):
+  PARAMETRIC: int = auto()
+  NONPARAMETRIC: int = auto()
+
 @dataclass
 class eq_solvers:
   a: np.ndarray = None
