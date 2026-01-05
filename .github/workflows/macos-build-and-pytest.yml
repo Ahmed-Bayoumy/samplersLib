@@ -35,6 +35,6 @@ jobs:
     - name: Build package
       run: uv build
     - name: Install built wheel
-      run: uv pip install --system --find-links dist samplersLib
+      run: pip install --system --find-links dist samplersLib
     - name: Run pytest
-      run: uv run python -m pytest
+      run: pytest
