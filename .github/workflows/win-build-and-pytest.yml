@@ -28,10 +28,12 @@ jobs:
       with:
         enable-cache: true
         python-version: "3.11"
-    - name: Install built wheel
-      run: uv pip install --system --find-links dist samplersLib
+    - name: suncing
+      run: uv sync --all-extras --all-groups
     - name: ruff lint
       run: uvx ruff check .
+    - name: Install built wheel
+      run: uv pip install --system --find-links dist samplersLib
     - name: Build package
       run: uv build
     - name: Run pytest
