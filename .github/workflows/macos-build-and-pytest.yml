@@ -37,6 +37,6 @@ jobs:
     - name: Install built wheel
       run: |
         pip install --find-links dist samplersLib
-        pip install flake8 pytest pytest-cov
+        pip install plotly matplotlib flake8 pytest pytest-cov
     - name: Run pytest
       run: pytest
