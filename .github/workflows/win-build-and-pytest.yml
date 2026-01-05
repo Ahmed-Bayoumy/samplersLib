@@ -33,7 +33,7 @@ jobs:
     - name: Install built wheel
       run: uv pip install --system --find-links dist samplersLib
     - name: Install dependencies
-      run: uv pip install flake8 pytest pytest-cov
+      run: uv pip install --system flake8 pytest pytest-cov
     - name: Lint with flake8
       run: |
         # Stop the build if there are Python syntax errors or undefined names
