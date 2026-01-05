@@ -23,53 +23,31 @@
 #  Copyright (C) 2026  Ahmed H. Bayoumy                                               #
 # ------------------------------------------------------------------------------------#
 """
-
-from dataclasses import dataclass
-from enum import Enum, auto
-
 import numpy as np
 
-# import seaborn as sns
+class Particle:
+    def __init__(self, bounds, pos: np.ndarray = None):
+        if pos is None:
+            self.position = np.random.uniform(bounds[0], bounds[1], size=(bounds.shape[1],))
+        else:
+            self.position = pos.copy()
+        self.velocity = np.random.uniform(-1, 1, size=(bounds.shape[1],))
+        self.best_position = self.position.copy()
+        self.best_value = float('-inf')  # For sampling, we want the highest likelihood
 
+    def update_velocity(self, global_best_position, inertia_weight, cognitive_weight, social_weight):
+        r1, r2 = np.random.rand(2)
+        self.velocity = (inertia_weight * self.velocity +
+                         cognitive_weight * r1 * (self.best_position - self.position) +
+                         social_weight * r2 * (global_best_position - self.position))
 
-# pylint: disable=missing-function-docstring
-class TUNING_METHOD(Enum):
-    MLCV: int = auto()
-    SCOTT: int = auto()
-    SILVERMAN: int = auto()
+    def update_position(self, bounds):
+        self.position += self.velocity
+        # Enforce bounds
+        self.position = np.clip(self.position, bounds[0], bounds[1])
 
-
-# pylint: disable=missing-function-docstring
-class SAMPLING_METHOD(Enum):
-    FULLFACTORIAL: int = auto()
-    LH: int = auto()
-    RS: int = auto()
-    HALTON: int = auto()
-
-
-# pylint: disable=missing-function-docstring
-class KERNEL_TYPE(Enum):
-    PARAMETRIC: int = auto()
-    NONPARAMETRIC: int = auto()
-
-
-@dataclass
-# pylint: disable=missing-function-docstring
-class eq_solvers:
-    a: np.ndarray = None
-    b: np.ndarray = None
-
-    def __init__(self, a: np.ndarray, b: np.ndarray):
-        self.a = np.atleast_2d(a)
-        self.b = np.atleast_1d(b)
-
-    def fwd_solve(self):
-        n = len(self.b)
-        x = [0] * n
-        for i in range(n):
-            x[i] = self.b[i]
-            for j in range(0, i):
-                x[i] -= self.a[i][j] * x[j]
-                x[i] /= self.a[i][i]
-
-        return x
+    def evaluate(self, target_distribution):
+        value = target_distribution(self.position)
+        if value > self.best_value:
+            self.best_value = value
+            self.best_position = self.position.copy()
