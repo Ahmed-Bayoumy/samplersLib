@@ -1166,6 +1166,11 @@ visualization = [
     { name = "plotly" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "flake8" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "flake8", marker = "extra == 'test'", specifier = ">=7.3.0" },
@@ -1181,6 +1186,9 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.13.2" },
 ]
 provides-extras = ["visualization", "test"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "flake8", specifier = ">=7.3.0" }]
 
 [[package]]
 name = "scipy"

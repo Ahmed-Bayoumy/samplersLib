@@ -33,8 +33,13 @@ visualization = [
     "matplotlib>=3.10.8",
     "plotly>=6.5.0",
 ]
+
 test = [
-    "flake8>=7.3.0",
     "pytest>=8.0",
     "pytest-cov>=7.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "flake8>=7.3.0",
 ]
