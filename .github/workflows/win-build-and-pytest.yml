@@ -33,7 +33,7 @@ jobs:
     - name: Install built wheel
       run: uv pip install --system --find-links dist samplersLib
     - name: Sync dependencies and extras
-      run: uv sync --all-extras
+      run: uv sync --all-extras --system
     - name: Lint with flake8
       run: |
         # Stop the build if there are Python syntax errors or undefined names
