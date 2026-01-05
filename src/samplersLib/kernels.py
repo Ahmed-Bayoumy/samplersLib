@@ -146,9 +146,7 @@ class Kernel(ABC):
         :rtype: _type_
         """
         bw = []
-        if h is None:
-            bw = self.h
-        else:
+        if h is not None:
             self.h = h
             bw = h
 
@@ -310,11 +308,9 @@ class Kernel(ABC):
         for i in range(n):
             # Leave-one-out estimate: sum of kernels for all j != i
             self.h = h
-            self.set_bw(TUNING_METHOD.MLCV.name)
+            # self.set_bw(TUNING_METHOD.MLCV.name)
             xi = np.asarray(self.data[i])
-            prob_i = sum(
-                self._calc_kf_per_dp(self.data, xi) for j in range(n) if i != j
-            ) / (n - 1)
+            prob_i = sum(self._calc_kf_per_dp(self.data, xi) for j in range(n) if i != j) / (n - 1)
 
             # Avoid log(0)
             total_log_lik += np.log(max(prob_i, 1e-15))
@@ -337,9 +333,7 @@ class Kernel(ABC):
             if self._data_inv_cov is None:
                 if self.weights is None:
                     self.weights = np.ones(self._ns) / self._ns
-                self._data_cov = np.atleast_2d(
-                    np.cov(self.data.T, rowvar=1, bias=True, aweights=self.weights)
-                )
+                self._data_cov = np.atleast_2d(np.cov(self.data.T, rowvar=1, bias=True, aweights=self.weights))
                 self._data_inv_cov = np.linalg.inv(self._data_cov)
 
             self._cov = self._data_cov * self._factor**2
@@ -384,11 +378,7 @@ class Kernel(ABC):
         else:
             self._points = points
 
-        return (
-            self.get_ke_non_param()
-            if self._type == KERNEL_TYPE.NONPARAMETRIC
-            else self.get_ke_param()
-        )
+        return self.get_ke_non_param() if self._type == KERNEL_TYPE.NONPARAMETRIC else self.get_ke_param()
 
     def get_ke_non_param(self):
         """_summary_
@@ -430,7 +420,7 @@ class Kernel(ABC):
 
         return np.asarray(self.est_pdf)
 
-    def _sample_noise(self):
+    def _sample_noise(self):  # noqa: C901
         """_summary_
 
         :return: _description_
@@ -441,32 +431,19 @@ class Kernel(ABC):
         # 1. Infinite Support Kernels
         if kernel_name == "gaussian" or kernel_name == "gaussianrbf":
             # Box-Muller for Normal Distribution
-            return [
-                h
-                * np.sqrt(-2 * np.log(random.random()))
-                * np.cos(2 * np.pi * random.random())
-                for _ in range(self._nd)
-            ]
+            return [h * np.sqrt(-2 * np.log(random.random())) * np.cos(2 * np.pi * random.random()) for _ in range(self._nd)]
 
         elif kernel_name == "cauchy":
             # Inverse Transform Sampling: h * tan(pi * (U - 0.5))
-            return [
-                h * np.tan(np.pi * (random.random() - 0.5)) for _ in range(self._nd)
-            ]
+            return [h * np.tan(np.pi * (random.random() - 0.5)) for _ in range(self._nd)]
 
         elif kernel_name == "laplace":
             # Difference of two exponentials
-            return [
-                h * (np.log(random.random()) - np.log(random.random()))
-                for _ in range(self._nd)
-            ]
+            return [h * (np.log(random.random()) - np.log(random.random())) for _ in range(self._nd)]
 
         elif kernel_name == "logistic":
             # h * log(U / (1-U))
-            return [
-                h * np.log(u / (1 - u)) if (u := random.random()) else 0
-                for _ in range(self._nd)
-            ]
+            return [h * np.log(u / (1 - u)) if (u := random.random()) else 0 for _ in range(self._nd)]
 
         # 2. Compact Support Kernels (Bounded within [-h, h])
         # Using Rejection Sampling for complex shapes
@@ -566,9 +543,7 @@ class Gaussian(Kernel):
 
         # Fallback: Diagonal bandwidth assumption
         if self.h is None:
-            raise ValueError(
-                "Bandwidth `h` must be set for fallback multivariate kernel."
-            )
+            raise ValueError("Bandwidth `h` must be set for fallback multivariate kernel.")
 
         h_arr = np.asarray(self.h)
         scaled_z = z / h_arr
@@ -629,9 +604,7 @@ class Cauchy(Kernel):
                 return 1.0 / ((1.0 + quad_form) ** ((self._nd + 1) / 2.0))
 
         if self.h is None:
-            raise ValueError(
-                "Bandwidth `h` must be set for fallback multivariate kernel."
-            )
+            raise ValueError("Bandwidth `h` must be set for fallback multivariate kernel.")
 
         h_arr = np.asarray(self.h)
         scaled_z = z / h_arr
@@ -676,12 +649,7 @@ class Epanechnikov(Kernel):
 
     def kf_univar(self, u):
         # return self.bounded((3 / 4 * (1 - u * u)), u)
-        h = (
-            self.h[0]
-            if (isinstance(self.h, list) or isinstance(self.h, np.ndarray))
-            and len(self.h) == 1
-            else self.h
-        )
+        h = self.h[0] if (isinstance(self.h, list) or isinstance(self.h, np.ndarray)) and len(self.h) == 1 else self.h
         return (3 / (4 * h)) * (1 - ((u) / h) ** 2) * (np.abs(u) < h)
 
     def kf_multivar(self, u):
@@ -730,9 +698,7 @@ class Laplace(Kernel):
         self.vlim = np.atleast_2d(vlim) if vlim is not None else None
         self.bw_method = bw_method
         self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = (
-            np.array(h) if h is not None else np.ones(self._nd)
-        )  # fallback bandwidth
+        self.h = np.array(h) if h is not None else np.ones(self._nd)  # fallback bandwidth
         self._calculate_bw = calculate_bw
         if self._cov is None and self._calculate_bw:
             self.set_bw(method=bw_method)
@@ -775,18 +741,12 @@ class Cosine(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        h = (
-            self.h[0]
-            if (isinstance(self.h, list) or isinstance(self.h, np.ndarray))
-            and len(self.h) == 1
-            else self.h
-        )
+        h = self.h[0] if (isinstance(self.h, list) or isinstance(self.h, np.ndarray)) and len(self.h) == 1 else self.h
         return self.bounded((1 / (2 * h)) * np.cos(np.pi * u / h), u=u)
 
     def kf_multivar(self, u):
         return self.bounded(
-            (1 / (2 * np.prod(self.h)) ** len(u))
-            * np.cos(np.pi * np.prod(u) / np.prod(self.h)),
+            (1 / (2 * np.prod(self.h)) ** len(u)) * np.cos(np.pi * np.prod(u) / np.prod(self.h)),
             np.prod(u),
         )
 
@@ -817,12 +777,7 @@ class Linear(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        h = (
-            self.h[0]
-            if (isinstance(self.h, list) or isinstance(self.h, np.ndarray))
-            and len(self.h) == 1
-            else self.h
-        )
+        h = self.h[0] if (isinstance(self.h, list) or isinstance(self.h, np.ndarray)) and len(self.h) == 1 else self.h
         return max(0, 1 - abs(u) / h)
 
     def kf_multivar(self, u):
@@ -890,9 +845,7 @@ class Triweight(Kernel):
         return self.bounded((35 / 32) * (1 - u**2) ** 3, u)
 
     def kf_multivar(self, u):
-        return self.bounded(
-            np.prod((35 / 32) * (1 - u**2) ** 3) / np.prod(self.h), np.prod(u)
-        )
+        return self.bounded(np.prod((35 / 32) * (1 - u**2) ** 3) / np.prod(self.h), np.prod(u))
 
 
 class Tricube(Kernel):
@@ -924,9 +877,7 @@ class Tricube(Kernel):
         return self.bounded((70 / 81) * (1 - np.abs(u) ** 3) ** 3, u)
 
     def kf_multivar(self, u):
-        return self.bounded(
-            np.prod((70 / 81) * (1 - np.abs(u) ** 3) ** 3) / np.prod(self.h), np.prod(u)
-        )
+        return self.bounded(np.prod((70 / 81) * (1 - np.abs(u) ** 3) ** 3) / np.prod(self.h), np.prod(u))
 
 
 class Silverman(Kernel):
@@ -955,22 +906,13 @@ class Silverman(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        return (
-            0.5
-            * np.exp(-(abs(u)) / np.sqrt(2))
-            * np.sin((abs(u) / np.sqrt(2)) + (np.pi / 4))
-        )
+        return 0.5 * np.exp(-(abs(u)) / np.sqrt(2)) * np.sin((abs(u) / np.sqrt(2)) + (np.pi / 4))
 
     def kf_multivar(self, u):
         h = np.array(self.h)
         u = np.array(u)
         return self.bounded(
-            np.prod(
-                0.5
-                * np.exp(-(abs(u)) / np.sqrt(2))
-                * np.sin((abs(u) / np.sqrt(2)) + (np.pi / 4))
-            )
-            / np.prod(h),
+            np.prod(0.5 * np.exp(-(abs(u)) / np.sqrt(2)) * np.sin((abs(u) / np.sqrt(2)) + (np.pi / 4))) / np.prod(h),
             np.prod(u),
         )
 
@@ -1039,9 +981,7 @@ class Biweight(Kernel):
         return self.bounded((15 / 16) * (1 - u**2) ** 2, u)
 
     def kf_multivar(self, u):
-        return self.bounded(
-            np.prod((15 / 16) * (1 - u**2) ** 2) / np.prod(self.h), np.prod(u)
-        )
+        return self.bounded(np.prod((15 / 16) * (1 - u**2) ** 2) / np.prod(self.h), np.prod(u))
 
 
 class Logistic(Kernel):

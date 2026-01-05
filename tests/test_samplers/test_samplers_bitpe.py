@@ -22,6 +22,7 @@ def bitpe_instance():
     bad_data, bad_f = make_data(num_points=3, dim=3, seed=2)
 
     # Use a deterministic seed so the test is reproducible
+    v = np.array([[0, 1]] * 3)
     return BiTPE(
         good_data=good_data,
         good_f_values=good_f,
@@ -29,13 +30,14 @@ def bitpe_instance():
         bad_f_values=bad_f,
         kernel_type={"Gaussian": 1},
         n_r=2,  # keep the runtime tiny
-        vlim=None,
-        bw_method=TUNING_METHOD.MLCV.name,
+        vlim=v,
+        bw_method=TUNING_METHOD.SCOTT.name,
         seed=12345,
         weights=None,
-        h=None,
+        h=np.array([0.1]),
         gamma=0.25,
     )
+
 
 
 # pylint: disable=missing-function-docstring

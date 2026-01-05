@@ -45,3 +45,14 @@ dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
 ]
+
+[tool.ruff]
+line-length = 127
+
+[tool.ruff.lint]
+# E9, F63, F7, F82 are standard in Ruff's default 'E' and 'F' selections
+select = ["E", "F", "C90"] 
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
