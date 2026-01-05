@@ -38,4 +38,4 @@ jobs:
       run: uvx ruff check .
 
     - name: Run pytest
-      run: uv run pytest
+      run: uv run python -m pytest
