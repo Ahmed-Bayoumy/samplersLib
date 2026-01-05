@@ -33,11 +33,9 @@ jobs:
     - name: Install built wheel
       run: uv pip install --system --find-links dist samplersLib
     - name: Install dependencies, dev tools, and extras
-      run: |
-        uv sync --all-extras --all-groups
-        uv pip install pytest pytest-cov
+      run: uv sync --all-extras --all-groups
     - name: ruff lint
       run: uvx ruff check .
 
     - name: Run pytest
-      run: uv pytest
+      run: uvx pytest
