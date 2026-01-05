@@ -31,7 +31,7 @@ jobs:
     - name: Build package
       run: uv build
     - name: Install built wheel
-      run: uv pip install --system --find-links dist your-package-name
+      run: uv pip install --system --find-links dist samplersLib
     - name: Lint with flake8
       run: |
         # Stop the build if there are Python syntax errors or undefined names
