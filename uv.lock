@@ -1157,7 +1157,6 @@ dependencies = [
 
 [package.optional-dependencies]
 test = [
-    { name = "flake8" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -1169,11 +1168,11 @@ visualization = [
 [package.dev-dependencies]
 dev = [
     { name = "flake8" },
+    { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "flake8", marker = "extra == 'test'", specifier = ">=7.3.0" },
     { name = "matplotlib", marker = "extra == 'visualization'", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pandas", specifier = ">=2.3.3" },
@@ -1188,7 +1187,10 @@ requires-dist = [
 provides-extras = ["visualization", "test"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "flake8", specifier = ">=7.3.0" }]
+dev = [
+    { name = "flake8", specifier = ">=7.3.0" },
+    { name = "pytest", specifier = ">=9.0.2" },
+]
 
 [[package]]
 name = "scipy"
