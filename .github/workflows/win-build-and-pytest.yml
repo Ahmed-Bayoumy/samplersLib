@@ -28,14 +28,11 @@ jobs:
       with:
         enable-cache: true
         python-version: "3.11"
-    - name: Build package
-      run: uv build
     - name: Install built wheel
       run: uv pip install --system --find-links dist samplersLib
-    - name: Install dependencies, dev tools, and extras
-      run: uv sync --all-extras --all-groups
     - name: ruff lint
       run: uvx ruff check .
-
+    - name: Build package
+      run: uv build
     - name: Run pytest
       run: uv run python -m pytest
