@@ -32,9 +32,9 @@ jobs:
       run: uv sync --all-extras --all-groups
     - name: ruff lint
       run: uvx ruff check .
-    - name: Install built wheel
-      run: uv pip install --system --find-links dist samplersLib
     - name: Build package
       run: uv build
+    - name: Install built wheel
+      run: uv pip install --system --find-links dist samplersLib
     - name: Run pytest
       run: uv run python -m pytest
