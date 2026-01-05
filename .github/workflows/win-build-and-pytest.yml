@@ -31,7 +31,7 @@ jobs:
     - name: Build package
       run: uv build
     - name: Install built wheel
-      run: uv pip install dist/*.whl
+      run: uv pip install dist/*.whl --system
     - name: Lint with flake8
       run: |
         # Stop the build if there are Python syntax errors or undefined names
