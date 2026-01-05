@@ -35,8 +35,6 @@ jobs:
     - name: Build package
       run: uv build
     - name: Install built wheel
-      with: 
-        python-version: "3.11"
       run: |
         pip install --find-links dist samplersLib
         pip install plotly matplotlib flake8 pytest pytest-cov
