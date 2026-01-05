@@ -1,9 +1,9 @@
-import copy
 import numpy as np
 import pytest
 
 # Import the class under test – adjust the import path if your package layout differs
-from samplersLib.samplers import ActiveSampling, TUNING_METHOD
+from samplersLib.samplers import TUNING_METHOD, ActiveSampling
+
 
 # ----------------------------------------------------------------------
 # Helper fixtures
@@ -14,11 +14,13 @@ def simple_data():
     rng = np.random.default_rng(0)
     return rng.random((5, 2))
 
+
 @pytest.fixture
 def high_dim_data():
     """5‑D dataset (n_s=6, n_d=5) – triggers the reducer path."""
     rng = np.random.default_rng(1)
     return rng.random((6, 5))
+
 
 @pytest.fixture
 def var_limits():
@@ -39,7 +41,8 @@ def test_constructor_basic(simple_data):
         vlim=vlim,
         kernel_type=["Gaussian"],
         bw_method=TUNING_METHOD.SCOTT.name,
-        seed=123, h = [0.1]*2
+        seed=123,
+        h=[0.1] * 2,
     )
     # basic attributes are set
     assert sampler.n_s == simple_data.shape[0]
@@ -56,7 +59,8 @@ def test_constructor_invalid_data():
             n_r=2,
             vlim=vlim,
             kernel_type=["Gaussian"],
-            bw_method=TUNING_METHOD.SCOTT.name, h = [0.1]*2
+            bw_method=TUNING_METHOD.SCOTT.name,
+            h=[0.1] * 2,
         )
 
 
@@ -71,7 +75,8 @@ def test_constructor_weights_mismatch(simple_data):
             vlim=vlim,
             kernel_type=["Gaussian"],
             bw_method=TUNING_METHOD.SCOTT.name,
-            weights=[0.5, 0.5], h = [0.1]*2  # length 2 vs n_s=5
+            weights=[0.5, 0.5],
+            h=[0.1] * 2,  # length 2 vs n_s=5
         )
 
 
@@ -86,7 +91,8 @@ def test_standardize_and_rd(simple_data):
         n_r=2,
         vlim=vlim,
         kernel_type=["Gaussian"],
-        bw_method=TUNING_METHOD.SCOTT.name, h = [0.1]*2
+        bw_method=TUNING_METHOD.SCOTT.name,
+        h=[0.1] * 2,
     )
     sampler.standardize_data()
     # after standardisation we have zero‑mean, unit‑variance columns
@@ -106,7 +112,8 @@ def test_high_dimensional_path(high_dim_data, var_limits):
         n_r=3,
         vlim=var_limits,
         kernel_type=["Gaussian"],
-        bw_method=TUNING_METHOD.SCOTT.name, h = [0.1]*2
+        bw_method=TUNING_METHOD.SCOTT.name,
+        h=[0.1] * 2,
     )
     # The reducer is instantiated only for n_d > 3
     assert sampler.reducer is not None
@@ -124,7 +131,8 @@ def test_project_rd_to_original_space(high_dim_data, var_limits):
         n_r=3,
         vlim=var_limits,
         kernel_type=["Gaussian"],
-        bw_method=TUNING_METHOD.SCOTT.name, h = [0.1]*2
+        bw_method=TUNING_METHOD.SCOTT.name,
+        h=[0.1] * 2,
     )
     sampler.rd()
     # generate a few random points in reduced space
@@ -146,7 +154,8 @@ def test_resample_low_dim(simple_data):
         n_r=2,
         vlim=vlim,
         kernel_type=["Gaussian"],
-        bw_method=TUNING_METHOD.SCOTT.name, h = [0.1]*2
+        bw_method=TUNING_METHOD.SCOTT.name,
+        h=[0.1] * 2,
     )
     # Force a small number of kernels to keep the test fast
     sampler.kernel = sampler.kernel[:1]
@@ -164,7 +173,8 @@ def test_resample_high_dim(high_dim_data, var_limits):
         n_r=3,
         vlim=var_limits,
         kernel_type=["Gaussian"],
-        bw_method=TUNING_METHOD.SCOTT.name, h = [0.1]*3
+        bw_method=TUNING_METHOD.SCOTT.name,
+        h=[0.1] * 3,
     )
     # Reduce once so that internal attributes (eigenvectors, means, etc.) exist
     sampler.rd()
@@ -189,7 +199,8 @@ def test_resample_without_reduction_returns_numpy_array(simple_data):
         n_r=2,
         vlim=vlim,
         kernel_type=["Gaussian"],
-        bw_method=TUNING_METHOD.SCOTT.name, h = [0.1]*2
+        bw_method=TUNING_METHOD.SCOTT.name,
+        h=[0.1] * 2,
     )
     out = sampler.resample()
     assert isinstance(out, np.ndarray)
@@ -205,10 +216,11 @@ def test_kde_resample_is_deterministic_given_seed(simple_data):
         vlim=vlim,
         kernel_type=["Gaussian"],
         bw_method=TUNING_METHOD.SCOTT.name,
-        seed=999, h = [0.1]*2
+        seed=999,
+        h=[0.1] * 2,
     )
     # Run twice with the same seed – the internal RNG is re‑seeded only once at init,
     # but the stochastic path is deterministic for the duration of the test.
-    first = sampler.kde_resample(sampler.kernel, [1], sampler.data, seed = 10000)
-    second = sampler.kde_resample(sampler.kernel, [1], sampler.data, seed = 10000)
+    first = sampler.kde_resample(sampler.kernel, [1], sampler.data, seed=10000)
+    second = sampler.kde_resample(sampler.kernel, [1], sampler.data, seed=10000)
     np.testing.assert_allclose(first, second)

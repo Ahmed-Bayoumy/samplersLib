@@ -1,7 +1,6 @@
 # tests/test_decision_tree.py
 import numpy as np
 import pytest
-from collections import Counter
 
 # Import the class from the module you posted
 from samplersLib.importance import DecisionTree, gini_impurity, calculate_info_gain

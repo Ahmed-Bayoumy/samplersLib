@@ -24,48 +24,52 @@
 # ------------------------------------------------------------------------------------#
 """
 
-from enum import auto, Enum
 from dataclasses import dataclass
-from typing import List
+from enum import Enum, auto
+
 import numpy as np
-import plotly.express as px
+
 # import seaborn as sns
+
 
 # pylint: disable=missing-function-docstring
 class TUNING_METHOD(Enum):
-  MLCV: int = auto()
-  SCOTT: int = auto()
-  SILVERMAN: int = auto()
+    MLCV: int = auto()
+    SCOTT: int = auto()
+    SILVERMAN: int = auto()
+
 
 # pylint: disable=missing-function-docstring
 class SAMPLING_METHOD(Enum):
-  FULLFACTORIAL: int = auto()
-  LH: int = auto()
-  RS: int = auto()
-  HALTON: int = auto()
+    FULLFACTORIAL: int = auto()
+    LH: int = auto()
+    RS: int = auto()
+    HALTON: int = auto()
+
 
 # pylint: disable=missing-function-docstring
 class KERNEL_TYPE(Enum):
-  PARAMETRIC: int = auto()
-  NONPARAMETRIC: int = auto()
+    PARAMETRIC: int = auto()
+    NONPARAMETRIC: int = auto()
+
 
 @dataclass
 # pylint: disable=missing-function-docstring
 class eq_solvers:
-  a: np.ndarray = None
-  b: np.ndarray = None
+    a: np.ndarray = None
+    b: np.ndarray = None
 
-  def __init__(self, a: np.ndarray, b:np.ndarray):
-    self.a =np.atleast_2d(a)
-    self.b = np.atleast_1d(b)
+    def __init__(self, a: np.ndarray, b: np.ndarray):
+        self.a = np.atleast_2d(a)
+        self.b = np.atleast_1d(b)
 
-  def fwd_solve(self):
-    n = len(self.b)
-    x = [0]*n
-    for i in range(n):
-      x[i] = self.b[i]
-      for j in range(0,i):
-        x[i] -= self.a[i][j]*x[j]
-        x[i]/= self.a[i][i]
+    def fwd_solve(self):
+        n = len(self.b)
+        x = [0] * n
+        for i in range(n):
+            x[i] = self.b[i]
+            for j in range(0, i):
+                x[i] -= self.a[i][j] * x[j]
+                x[i] /= self.a[i][i]
 
-    return x
+        return x

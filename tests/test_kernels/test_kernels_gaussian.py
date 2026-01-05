@@ -1,5 +1,4 @@
 # test_kernels.py
-import copy
 import numpy as np
 import pytest
 

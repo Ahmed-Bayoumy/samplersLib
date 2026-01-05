@@ -1,10 +1,9 @@
 # tests/test_cauchy_kernel.py
-import copy
 import numpy as np
 import pytest
 
 # Import the class you want to test
-from samplersLib.kernels import Cauchy, Kernel, KERNEL_TYPE
+from samplersLib.kernels import KERNEL_TYPE, Cauchy
 
 
 @pytest.fixture
@@ -70,7 +69,6 @@ def test_multivariate_covariance_branch(sample_data):
 
     # pick a vector and compute the expected value
     z = np.array([0.3, -0.7])
-    det = np.linalg.det(cov)
     inv_cov = np.linalg.inv(cov)
     quad = z.T @ inv_cov @ z
     expected = 1.0 / ((1.0 + quad) ** ((k._nd + 1) / 2.0))
@@ -90,7 +88,7 @@ def test_multivariate_fallback_branch(sample_data):
     h_arr = np.asarray(bw)
     scaled = z / h_arr
     # fallback formula from the source code
-    expected = (1 / (np.pi * (1 + scaled ** 2))).mean()
+    expected = (1 / (np.pi * (1 + scaled**2))).mean()
 
     assert np.isclose(k.kf_multivar(z), expected, atol=1e-12)
 
@@ -99,5 +97,7 @@ def test_multivariate_missing_bandwidth_raises(sample_data):
     """If _cov is None and no bandwidth is supplied, a ValueError must be raised."""
     k = Cauchy(data=sample_data, calculate_bw=False)
     k._cov = None
-    with pytest.raises(ValueError, match="Bandwidth `h` must be set for fallback multivariate kernel."):
+    with pytest.raises(
+        ValueError, match="Bandwidth `h` must be set for fallback multivariate kernel."
+    ):
         k.kf_multivar(np.zeros(2))

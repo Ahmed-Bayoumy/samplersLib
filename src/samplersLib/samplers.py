@@ -23,33 +23,52 @@
 #  Copyright (C) 2026  Ahmed H. Bayoumy                                               #
 # ------------------------------------------------------------------------------------#
 """
-from abc import ABC, abstractmethod  # pylint: disable=too-many-lines
 
-import math
-from typing import Callable, Dict, Any, List
 import copy
-from dataclasses import dataclass
+import math
 import random
-from pyDOE2 import lhs
+from abc import ABC, abstractmethod  # pylint: disable=too-many-lines
+from dataclasses import dataclass
+from typing import Any, Dict, List
+
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
+from pyDOE2 import lhs
 from scipy.spatial.distance import cdist, pdist
 from scipy.stats import norm
-from scipy import stats
-import seaborn as sns
-import matplotlib.pyplot as plt
-import pandas as pd
-from .kernels import Kernel as KERNEL, Gaussian, Epanechnikov, Cosine, Linear, UniformRectangular, Triweight, Tricube, \
-    Silverman, Sigmoid, Biweight, Logistic, Laplace, \
-    GaussianRBF, MultiquadricRBF, InverseMultiquadricRBF, \
-    ThinPlateSplineRBF, Cauchy
-from ._common import *
-from .particle import Particle
-from .importance import RandomForest as RF
-from .metrics import TrustWorthiness, compute_dimension_relevance
-from .predictors import AdaptiveEnsemble, KNNKernelWeighted, MDNInspired, \
-    GPWithMixedKernel, KernelWeightedAverage, LocalPolynomialRegression, \
-    KernelRidgeRegression
 
+from ._common import TUNING_METHOD
+from .importance import RandomForest as RF
+from .kernels import (
+    Biweight,
+    Cauchy,
+    Cosine,
+    Epanechnikov,
+    Gaussian,
+    GaussianRBF,
+    InverseMultiquadricRBF,
+    Laplace,
+    Linear,
+    Logistic,
+    MultiquadricRBF,
+    Sigmoid,
+    Silverman,
+    ThinPlateSplineRBF,
+    Tricube,
+    Triweight,
+    UniformRectangular,
+)
+from .kernels import Kernel as KERNEL
+from .metrics import TrustWorthiness, compute_dimension_relevance
+from .particle import Particle
+from .predictors import (
+    AdaptiveEnsemble,
+    GPWithMixedKernel,
+    KernelRidgeRegression,
+    KNNKernelWeighted,
+)
 from .reducers import Reducers
 
 
@@ -61,7 +80,7 @@ class Sampling(ABC):
     should implement the specific sampling logic.
 
     Methods:
-    - __init__(self, *args, **kwargs): Initializes the sampling method with 
+    - __init__(self, *args, **kwargs): Initializes the sampling method with
     any necessary parameters.
     - sample(self, *args, **kwargs): Generates samples according to the specific sampling method.
     - generate_samples(self): Returns the generated samples.
@@ -111,25 +130,32 @@ class Sampling(ABC):
 
     def scale_to_limits(self, samples: np.ndarray) -> np.ndarray:
         """
-          Scale the samples from the unit hypercube to the specified limit.
+        Scale the samples from the unit hypercube to the specified limit.
         """
         n = self.var_limits.shape[0]
         for i in range(n):
-            samples[:, i] = self.var_limits[i, 0] + samples[:, i] * \
-                (self.var_limits[i, 1] - self.var_limits[i, 0])
+            samples[:, i] = self.var_limits[i, 0] + samples[:, i] * (
+                self.var_limits[i, 1] - self.var_limits[i, 0]
+            )
             if "msize" in self.options.keys():
                 s = samples[:, i]
-                nr = int((self.var_limits[i, 1] - self.var_limits[i, 0])/(self.options["msize"][i]
-                         if isinstance(self.options["msize"], list) else self.options["msize"]))
-                mod = s % ((self.var_limits[i, 1] - self.var_limits[i, 0])/nr)
+                nr = int(
+                    (self.var_limits[i, 1] - self.var_limits[i, 0])
+                    / (
+                        self.options["msize"][i]
+                        if isinstance(self.options["msize"], list)
+                        else self.options["msize"]
+                    )
+                )
+                mod = s % ((self.var_limits[i, 1] - self.var_limits[i, 0]) / nr)
                 samples[:, i] = s - mod
 
         return samples
 
     @abstractmethod
     def generate_samples(self, ns: int):
-        """ Compute the requested number of sampling points.
-          The number of dimensions (nx) is determined based on `varLimits.shape[0].` """
+        """Compute the requested number of sampling points.
+        The number of dimensions (nx) is determined based on `varLimits.shape[0].`"""
         pass
 
     @abstractmethod
@@ -316,22 +342,25 @@ class LHS(Sampling):
             self.random_state = self.options["randomness"]
         elif isinstance(self.options["randomness"], int):
             # pylint: disable=no-member
-            self.random_state = np.random.RandomState(
-                self.options["randomness"])
+            self.random_state = np.random.RandomState(self.options["randomness"])
         else:
             self.random_state = np.random.RandomState()  # pylint: disable=no-member
 
         if self.options["criterion"] != "ExactSE":
-            return self.scale_to_limits(self.methods(
-                nx,
-                ns=self.n_s,
-                criterion=self.options["criterion"],
-                r=self.random_state,
-            ))
+            return self.scale_to_limits(
+                self.methods(
+                    nx,
+                    ns=self.n_s,
+                    criterion=self.options["criterion"],
+                    r=self.random_state,
+                )
+            )
         elif self.options["criterion"] == "ExactSE":
             return self.scale_to_limits(self.methods(nx, self.n_s))
 
-    def methods(self, nx: int = None, ns: int = None, criterion: str = None, r: Any = None):
+    def methods(
+        self, nx: int = None, ns: int = None, criterion: str = None, r: Any = None
+    ):
         if criterion is not None:
             if self.options["criterion"]:
                 return lhs(
@@ -339,22 +368,27 @@ class LHS(Sampling):
                     samples=ns,
                     criterion=self.options["criterion"],
                     iterations=10,
-                    random_state=r
+                    random_state=r,
                 )
             else:
                 return lhs(
-                    nx,
-                    samples=ns,
-                    criterion=self.options["criterion"],
-                    random_state=r
+                    nx, samples=ns, criterion=self.options["criterion"], random_state=r
                 )
         else:
             return self._exactse(nx, ns)
 
-    def _optimize_exact_se(self, xf, t0=None,
-                           outer_loop=None, inner_loop=None, jj=20, tol=1e-3,
-                           p=10, return_hist=False, fixed_index=[]):
-
+    def _optimize_exact_se(
+        self,
+        xf,
+        t0=None,
+        outer_loop=None,
+        inner_loop=None,
+        jj=20,
+        tol=1e-3,
+        p=10,
+        return_hist=False,
+        fixed_index=[],
+    ):
         # Initialize parameters if not defined
         if t0 is None:
             t0 = 0.005 * self._phi_p(xf, p=p)
@@ -387,8 +421,11 @@ class LHS(Sampling):
                 l_phip = list()
                 for j in range(jj):
                     l_x.append(xf_.copy())
-                    l_phip.append(self._phi_p_transfer(l_x[j], k=modulo,
-                                                       phi_p=phip_, p=p, fixed_index=fixed_index))
+                    l_phip.append(
+                        self._phi_p_transfer(
+                            l_x[j], k=modulo, phi_p=phip_, p=p, fixed_index=fixed_index
+                        )
+                    )
                 l_phip = np.asarray(l_phip)
                 k = np.argmin(l_phip)
                 phip_try = l_phip[k]
@@ -433,11 +470,10 @@ class LHS(Sampling):
             return x_best
 
     def _phi_p(self, x, p=10):
-
         return ((pdist(x) ** (-p)).sum()) ** (1.0 / p)
 
     def _phi_p_transfer(self, x, k, phi_p, p, fixed_index):
-        """ Optimize how we calculate the phi_p criterion. """
+        """Optimize how we calculate the phi_p criterion."""
 
         # Choose two (different) random rows to perform the exchange
         i1 = self.random_state.randint(x.shape[0])
@@ -452,15 +488,12 @@ class LHS(Sampling):
 
         dist1 = cdist([x[i1, :]], x_)
         dist2 = cdist([x[i2, :]], x_)
-        d1 = np.sqrt(
-            dist1 ** 2 + (x[i2, k] - x_[:, k]) ** 2 - (x[i1, k] - x_[:, k]) ** 2
-        )
-        d2 = np.sqrt(
-            dist2 ** 2 - (x[i2, k] - x_[:, k]) ** 2 + (x[i1, k] - x_[:, k]) ** 2
-        )
+        d1 = np.sqrt(dist1**2 + (x[i2, k] - x_[:, k]) ** 2 - (x[i1, k] - x_[:, k]) ** 2)
+        d2 = np.sqrt(dist2**2 - (x[i2, k] - x_[:, k]) ** 2 + (x[i1, k] - x_[:, k]) ** 2)
 
-        res = (phi_p ** p + (d1 ** (-p) - dist1 ** (-p) + d2 ** (-p) -
-                             dist2 ** (-p)).sum()) ** (1.0 / p)
+        res = (
+            phi_p**p + (d1 ** (-p) - dist1 ** (-p) + d2 ** (-p) - dist2 ** (-p)).sum()
+        ) ** (1.0 / p)
         x[i1, k], x[i2, k] = x[i2, k], x[i1, k]
 
         return res
@@ -492,15 +525,18 @@ class LHS(Sampling):
         """
         Expand the LHC sampling
         """
-        var_limits = self.options["varLimits"] if self.var_limits is None else self.var_limits
+        var_limits = (
+            self.options["varLimits"] if self.var_limits is None else self.var_limits
+        )
 
         new_num = len(x) + n_points
 
         # Evenly spaced intervals with the final dimension of the LHS
         intervals = []
         for i, _ in enumerate(var_limits):
-            intervals.append(np.linspace(
-                var_limits[i][0], var_limits[i][1], new_num + 1))
+            intervals.append(
+                np.linspace(var_limits[i][0], var_limits[i][1], new_num + 1)
+            )
 
         # Creates a subspace with the rows and columns that have no points
         # in the new space
@@ -520,10 +556,9 @@ class LHS(Sampling):
             )
 
             [
-                subspace_limits[i].append(
-                    [intervals[i][ii], intervals[i][ii + 1]])
+                subspace_limits[i].append([intervals[i][ii], intervals[i][ii + 1]])
                 for ii in range(len(subspace_bool[i]))
-                if not (True in subspace_bool[i][ii])
+                if True not in subspace_bool[i][ii]
             ]
 
         # Sampling of the new subspace
@@ -620,7 +655,9 @@ class Halton(Sampling):
         prime_list = []
         current_no = 2
         if n < 0:
-            raise ValueError("A negative count is provided which might lead to an infinite loop. Assign the count to a positive value.")
+            raise ValueError(
+                "A negative count is provided which might lead to an infinite loop. Assign the count to a positive value."
+            )
         while len(prime_list) < n:
             for i in range(2, current_no):
                 if (current_no % i) == 0:
@@ -657,9 +694,11 @@ class Halton(Sampling):
             base_rep = self.base_conv(pure_numbers[i], pb)
             bitwise_rep.append(base_rep)
             reversed_bitwise_rep.append(base_rep[::-1])
-            sequence_bitwise.append(['0.'] + reversed_bitwise_rep[i])
+            sequence_bitwise.append(["0."] + reversed_bitwise_rep[i])
             sequence_decimal[i, 0] = self.pb_to_dec(sequence_bitwise[i], pb)
-        sequence_decimal = sequence_decimal.reshape(sequence_decimal.shape[0], )
+        sequence_decimal = sequence_decimal.reshape(
+            sequence_decimal.shape[0],
+        )
         return sequence_decimal
 
     def pb_to_dec(self, num, base):
@@ -670,7 +709,7 @@ class Halton(Sampling):
         decimal_equivalent = 0
         # Convert fractional part decimal equivalent
         for i in range(1, len(binary)):
-            decimal_equivalent += int(binary[i]) / (base ** i)
+            decimal_equivalent += int(binary[i]) / (base**i)
         return decimal_equivalent
 
     def primes_from_2_to(self, n):
@@ -681,11 +720,11 @@ class Halton(Sampling):
         :rtype: list
         """
         sieve = np.ones(n // 3 + (n % 6 == 2), dtype=np.bool)
-        for i in range(1, int(n ** 0.5) // 3 + 1):
+        for i in range(1, int(n**0.5) // 3 + 1):
             if sieve[i]:
                 k = 3 * i + 1 | 1
-                sieve[k * k // 3::2 * k] = False
-                sieve[k * (k - 2 * (i & 1) + 4) // 3::2 * k] = False
+                sieve[k * k // 3 :: 2 * k] = False
+                sieve[k * (k - 2 * (i & 1) + 4) // 3 :: 2 * k] = False
         return np.r_[2, 3, ((3 * np.nonzero(sieve)[0][1:] + 1) | 1)]
 
     def van_der_corput(self, n_sample, base=2):
@@ -697,7 +736,7 @@ class Halton(Sampling):
         """
         sequence = []
         for i in range(n_sample):
-            n_th_number, denom = 0., 1.
+            n_th_number, denom = 0.0, 1.0
             while i > 0:
                 i, remainder = divmod(i, base)
                 denom *= base
@@ -728,7 +767,7 @@ class Halton(Sampling):
         else:
             big_number = 10
             dim = self.var_limits.shape[0]
-            while 'Not enought primes':
+            while "Not enought primes":
                 base = self.primes_from_2_to(big_number)[:dim]
                 if len(base) == dim:
                     break
@@ -756,9 +795,10 @@ class Halton(Sampling):
 @dataclass
 class KernelFunctions:
     """
-    A data class that holds a dictionary for all the kernels implemented in this package 
+    A data class that holds a dictionary for all the kernels implemented in this package
     mapped to their corresponding callables
     """
+
     kfs: Dict[str, KERNEL] = None
 
     def __init__(self):
@@ -782,7 +822,7 @@ class KernelFunctions:
             "MultiquadricRBF": MultiquadricRBF,
             "InverseMultiquadricRBF": InverseMultiquadricRBF,
             "ThinPlateSplineRBF": ThinPlateSplineRBF,
-            "Cauchy": Cauchy
+            "Cauchy": Cauchy,
         }
 
 
@@ -794,9 +834,17 @@ class ActiveSampling(Sampling):
     :type Sampling: _type_
     """
 
-    def __init__(self, data: np.ndarray, n_r: int, vlim: np.ndarray,
-                 kernel_type: List[str] = ["Gaussian"], bw_method=TUNING_METHOD.SCOTT.name,
-                 seed: int = 10000, weights: Any = None, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray,
+        n_r: int,
+        vlim: np.ndarray,
+        kernel_type: List[str] = ["Gaussian"],
+        bw_method=TUNING_METHOD.SCOTT.name,
+        seed: int = 10000,
+        weights: Any = None,
+        h: List[float] = None,
+    ):
         """
         Initializer
 
@@ -813,7 +861,7 @@ class ActiveSampling(Sampling):
         :param h: initial bandwidth, defaults to None
         :type h: List[float], optional
         """
-        self._cov_decomp: str = 'svd'
+        self._cov_decomp: str = "svd"
         self.reducer: Reducers = None
         self.data_reduced: np.ndarray = None
         self.data_standardized: np.ndarray = None
@@ -821,32 +869,53 @@ class ActiveSampling(Sampling):
         self._msgs: List[List[str]] = []
         self.kernel_funcs: Dict = KernelFunctions().kfs
         if self.data.shape[0] <= 1:
-            self._msgs.append([2, "`data` passed in to the \
+            self._msgs.append(
+                [
+                    2,
+                    "`data` passed in to the \
                                `activeSampling` constructor should \
-                               include multiple sample points."])
-            raise ValueError("`data` passed in to the `activeSampling` \
-                             constructor should include multiple sample points.")
+                               include multiple sample points.",
+                ]
+            )
+            raise ValueError(
+                "`data` passed in to the `activeSampling` \
+                             constructor should include multiple sample points."
+            )
         self.n_r: int = n_r
         self.n_s, self.n_d = self.data.shape
         if weights is not None:
             self._weights: Any = np.atleast_1d(weights).astype(float)
             self._weights /= sum(self._weights)
             if self._weights.ndim != 1:
-                self._msgs.append([2, "`weights` passed in to the `activeSampling` \
-                                   constructor should be on-diemsional vector."])
-                raise ValueError("`weights` passed in to the `activeSampling` \
-                                   constructor should be on-diemsional vector.")
+                self._msgs.append(
+                    [
+                        2,
+                        "`weights` passed in to the `activeSampling` \
+                                   constructor should be on-diemsional vector.",
+                    ]
+                )
+                raise ValueError(
+                    "`weights` passed in to the `activeSampling` \
+                                   constructor should be on-diemsional vector."
+                )
             if self._weights.shape[0] != self.n_s:
-                self._msgs.append([2, "`weights` passed in to the `activeSampling` \
+                self._msgs.append(
+                    [
+                        2,
+                        "`weights` passed in to the `activeSampling` \
                                    constructor should have the same size of \
-                                   the input `data` array."])
-                raise ValueError("`weights` passed in to the `activeSampling` \
-                                 constructor should have the same size of the input `data` array.")
-            self._ne = 1/sum(self._weights**2)
+                                   the input `data` array.",
+                    ]
+                )
+                raise ValueError(
+                    "`weights` passed in to the `activeSampling` \
+                                 constructor should have the same size of the input `data` array."
+                )
+            self._ne = 1 / sum(self._weights**2)
         else:
-            self._weights: Any = np.atleast_1d([1]*self.n_s).astype(float)
+            self._weights: Any = np.atleast_1d([1] * self.n_s).astype(float)
             self._weights /= sum(self._weights)
-            self._ne = int(1/sum(self._weights**2))
+            self._ne = int(1 / sum(self._weights**2))
 
         self.resampled_data: np.ndarray = np.zeros((self.n_r, self.n_d))
         self.seed = seed
@@ -862,26 +931,50 @@ class ActiveSampling(Sampling):
         for k in kernel_type:
             if k in self.kernel_funcs.keys():
                 kf = self.kernel_funcs.get(k)
-                self.kernel.append(kf(data=data, vlim=vlim, weights=self._weights,
-                                      bw_method=bw_method, h=h[:data.shape[1]], n_r=self.n_r))
+                self.kernel.append(
+                    kf(
+                        data=data,
+                        vlim=vlim,
+                        weights=self._weights,
+                        bw_method=bw_method,
+                        h=h[: data.shape[1]],
+                        n_r=self.n_r,
+                    )
+                )
             else:
-                self._msgs.append([1, "Unknown kernel type. \
-                                   Switched to the default Gaussian kernel."])
-                self.kernel.append(Gaussian(data=data, vlim=vlim, weights=self._weights,
-                                            bw_method=bw_method, h=h[:data.shape[1]], n_r=self.n_r))
+                self._msgs.append(
+                    [
+                        1,
+                        "Unknown kernel type. \
+                                   Switched to the default Gaussian kernel.",
+                    ]
+                )
+                self.kernel.append(
+                    Gaussian(
+                        data=data,
+                        vlim=vlim,
+                        weights=self._weights,
+                        bw_method=bw_method,
+                        h=h[: data.shape[1]],
+                        n_r=self.n_r,
+                    )
+                )
 
     def standardize_data(self):
         """
         Standardize data
         """
-        self.data_scaled = (self.data - self.var_limits[:, 0]) / \
-            (self.var_limits[:, 1] - self.var_limits[:, 0])
+        self.data_scaled = (self.data - self.var_limits[:, 0]) / (
+            self.var_limits[:, 1] - self.var_limits[:, 0]
+        )
         self.means = np.mean(self.data_scaled, axis=0)
         self.std_devs = np.std(self.data_scaled, axis=0)
         self.data_standardized = (self.data_scaled - self.means) / self.std_devs
         nan_indices = np.isnan(self.data_standardized)
         col_means = np.random.normal(0, 1e-5, size=self.n_d)
-        self.data_standardized[nan_indices] = np.take(col_means, np.where(nan_indices)[1])
+        self.data_standardized[nan_indices] = np.take(
+            col_means, np.where(nan_indices)[1]
+        )
 
     def rd(self):
         """
@@ -896,12 +989,11 @@ class ActiveSampling(Sampling):
 
         # Sort eigenvalues in descending order, and rearrange the eigenvectors accordingly
         sorted_indices = np.argsort(eigenvalues)[::-1]
-        eigenvalues_sorted = eigenvalues[sorted_indices]
         eigenvectors_sorted = eigenvectors[:, sorted_indices]
 
         # Select the top 'k' eigenvectors to form the new matrix
         self.k = 3  # Number of principal components we want (reduce to 3D)
-        self.eigenvectors_top_k = eigenvectors_sorted[:, :self.k]
+        self.eigenvectors_top_k = eigenvectors_sorted[:, : self.k]
 
         # Project the original data onto the new space
         self.data_reduced = np.dot(self.data_standardized, self.eigenvectors_top_k)
@@ -910,14 +1002,14 @@ class ActiveSampling(Sampling):
         """
         Project reduced space to original full space
         """
-        return samples.dot((self.eigenvectors_top_k[:, :self.k].T) + self.means)
+        return samples.dot((self.eigenvectors_top_k[:, : self.k].T) + self.means)
 
     @classmethod
-    def kde_resample(cls, ks: List[KERNEL],
-                     weights: List[float], data: List[List[float]],
-                     seed: int):
+    def kde_resample(
+        cls, ks: List[KERNEL], weights: List[float], data: List[List[float]], seed: int
+    ):
         """
-        Resample using inferred distributions by introduced KDEs for a given dataset 
+        Resample using inferred distributions by introduced KDEs for a given dataset
         """
         random.seed(seed)
         base_point = random.choice(data)
@@ -934,10 +1026,12 @@ class ActiveSampling(Sampling):
         if size is None:
             size = self.n_r
         for _ in range(size):
-            samples += self.kde_resample(ks=self.kernel,
-                                         weights=[1/len(self.kernel)]*len(self.kernel),
-                                         data=self.data_reduced if self.n_d > 3
-                                         else self.data, seed=self.seed)
+            samples += self.kde_resample(
+                ks=self.kernel,
+                weights=[1 / len(self.kernel)] * len(self.kernel),
+                data=self.data_reduced if self.n_d > 3 else self.data,
+                seed=self.seed,
+            )
         # for i, _ in enumerate(self.kernel):
         #     if size is None:
         #         size = int(self.kernel[i]._ne)
@@ -972,12 +1066,14 @@ class ActiveSampling(Sampling):
         if self.n_d <= 3:
             return np.array(samples)
         else:
-            x_resampled = \
-                self.reducer.project_rd_to_original_space(samples=np.array(samples))
+            x_resampled = self.reducer.project_rd_to_original_space(
+                samples=np.array(samples)
+            )
             x_resampled_clipped = np.clip(x_resampled, 0, 1)
-            x_resampled_original = x_resampled_clipped * (self.var_limits[:, 1] -
-                                                          self.var_limits[:, 0]) + \
-                self.var_limits[:, 0]
+            x_resampled_original = (
+                x_resampled_clipped * (self.var_limits[:, 1] - self.var_limits[:, 0])
+                + self.var_limits[:, 0]
+            )
             return x_resampled_original
 
         # rg = np.random
@@ -1024,6 +1120,7 @@ class ActiveSampling(Sampling):
         #       omit.append(i)
 
         # return np.delete(new, omit, axis=0)
+
     def generate_samples(self, ns: int):
         pass
 
@@ -1045,20 +1142,38 @@ class TunablePSS(Sampling):
     :type Sampling: _type_
     """
 
-    def __init__(self, data: np.ndarray, y: np.ndarray, x_inc: np.ndarray,
-                 it: int, vlim: np.ndarray, num_particles=100, max_iter=100,
-                 inertia_weight: int = 0.1, cognitive_weight: int = 1,
-                 social_weight: int = 1, seed: int = 10000, weights: Any = None):
-        self._cov_decomp: str = 'svd'
+    def __init__(
+        self,
+        data: np.ndarray,
+        y: np.ndarray,
+        x_inc: np.ndarray,
+        it: int,
+        vlim: np.ndarray,
+        num_particles=100,
+        max_iter=100,
+        inertia_weight: int = 0.1,
+        cognitive_weight: int = 1,
+        social_weight: int = 1,
+        seed: int = 10000,
+        weights: Any = None,
+    ):
+        self._cov_decomp: str = "svd"
         self._msgs: List[List[str]] = []
         self.it = it
         self.data: np.ndarray = copy.deepcopy(data)
         self.x_incumbent: np.ndarray = copy.deepcopy(x_inc)
         if self.data.size <= 1:
-            self._msgs.append([2, "`data` passed in to the `activeSampling` \
-                               constructor should include multiple sample points."])
-            raise ValueError("`data` passed in to the `activeSampling` \
-                             constructor should include multiple sample points.")
+            self._msgs.append(
+                [
+                    2,
+                    "`data` passed in to the `activeSampling` \
+                               constructor should include multiple sample points.",
+                ]
+            )
+            raise ValueError(
+                "`data` passed in to the `activeSampling` \
+                             constructor should include multiple sample points."
+            )
         self.selector: List[RF] = [RF(n_estimators=10, max_depth=3)] * y.shape[1]
         self.n_s, self.n_d = self.data.shape
         if weights is None:
@@ -1072,17 +1187,31 @@ class TunablePSS(Sampling):
         self._weights = np.atleast_1d(weights).astype(float)
         self._weights /= sum(self._weights) if sum(self._weights) > 0 else 1
         if not self._weights.ndim == 1:
-            self._msgs.append([2, "`weights` passed in to the `activeSampling` "
-                               "constructor should be on-diemsional vector."])
-            raise ValueError("`weights` passed in to the `activeSampling` \
-                                constructor should be on-diemsional vector.")
+            self._msgs.append(
+                [
+                    2,
+                    "`weights` passed in to the `activeSampling` "
+                    "constructor should be on-diemsional vector.",
+                ]
+            )
+            raise ValueError(
+                "`weights` passed in to the `activeSampling` \
+                                constructor should be on-diemsional vector."
+            )
         if self._weights.shape[0] != self.n_d:
-            self._msgs.append([2, "`weights` passed in to the `activeSampling` \
+            self._msgs.append(
+                [
+                    2,
+                    "`weights` passed in to the `activeSampling` \
                                 constructor should have the same size of \
-                                the input `data` array."])
-            raise ValueError("`weights` passed in to the `activeSampling` \
-                                constructor should have the same size of the input `data` array.")
-        self._ne = 1/sum(self._weights**2)
+                                the input `data` array.",
+                ]
+            )
+            raise ValueError(
+                "`weights` passed in to the `activeSampling` \
+                                constructor should have the same size of the input `data` array."
+            )
+        self._ne = 1 / sum(self._weights**2)
 
         self.seed = seed
         self.var_limits = [[], []]
@@ -1114,16 +1243,22 @@ class TunablePSS(Sampling):
         mean = np.zeros(x.shape[0])  # Mean at the origin
         cov = np.eye(x.shape[0])  # Identity covariance matrix (standard normal)
         exponent = -0.5 * np.dot((x - mean), np.dot(np.linalg.inv(cov), (x - mean)))
-        return (1 / np.sqrt((2 * np.pi)**len(x) * np.linalg.det(cov))) * np.exp(exponent)
+        return (1 / np.sqrt((2 * np.pi) ** len(x) * np.linalg.det(cov))) * np.exp(
+            exponent
+        )
 
     def particle_swarm_sampling(self, size):
         """
         PSS sampling
         """
-        particles = [Particle(bounds=self.var_limits, pos=self.data[i]
-                              if i < len(self.data) else None) for i in range(self.num_particles)]
+        particles = [
+            Particle(
+                bounds=self.var_limits, pos=self.data[i] if i < len(self.data) else None
+            )
+            for i in range(self.num_particles)
+        ]
         global_best_position = None
-        global_best_value = float('-inf')
+        global_best_value = float("-inf")
 
         samples = []
 
@@ -1135,8 +1270,12 @@ class TunablePSS(Sampling):
                     global_best_position = particle.best_position
 
             for particle in particles:
-                particle.update_velocity(global_best_position, self.inertia_weight,
-                                         self.cognitive_weight, self.social_weight)
+                particle.update_velocity(
+                    global_best_position,
+                    self.inertia_weight,
+                    self.cognitive_weight,
+                    self.social_weight,
+                )
                 particle.update_position(self.var_limits)
 
             # Store the current positions as samples
@@ -1159,11 +1298,13 @@ class TunablePSS(Sampling):
         self.seed = copy.deepcopy(seed)
         samples = self.particle_swarm_sampling(size)
 
-        res = self.resample_multidimensional_variables(variables=samples,
-                                                       dimension_weights=self._weights,
-                                                       num_samples=size) \
-            if sum(self._weights) > 0 \
+        res = (
+            self.resample_multidimensional_variables(
+                variables=samples, dimension_weights=self._weights, num_samples=size
+            )
+            if sum(self._weights) > 0
             else samples
+        )
         # self.plotting(res)
         return res
 
@@ -1175,16 +1316,20 @@ class TunablePSS(Sampling):
         num_dimensions = len(data[0])
 
         # Convert the data into a DataFrame for better handling with seaborn
-        df = pd.DataFrame(data, columns=[f"x{i+1}" for i in range(num_dimensions)])
+        df = pd.DataFrame(data, columns=[f"x{i + 1}" for i in range(num_dimensions)])
 
         # Create a pair plot (scatter plot matrix)
         sns.pairplot(df, height=2.5)
 
         # Show the plot
-        plt.suptitle(f"Pairwise Scatter Plot Matrix of {num_dimensions} Dimensions", y=1.02)
+        plt.suptitle(
+            f"Pairwise Scatter Plot Matrix of {num_dimensions} Dimensions", y=1.02
+        )
         plt.show()
 
-    def resample_multidimensional_variables(self, variables, dimension_weights, num_samples):
+    def resample_multidimensional_variables(
+        self, variables, dimension_weights, num_samples
+    ):
         """
         Randomly resamples multidimensional variables based on the \
             importance weight of each dimension.
@@ -1216,7 +1361,9 @@ class TunablePSS(Sampling):
             # For each sample, generate a random number and map it to the corresponding index
             for i in range(num_samples):
                 # Generate a random number between 0 and 1
-                rd = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(self.it+i)))  # pylint: disable=no-member
+                rd = np.random.RandomState(
+                    np.random.MT19937(np.random.SeedSequence(self.it + i))
+                )  # pylint: disable=no-member
                 rand_value = rd.rand()
 
                 # Find the index where this random value fits within the cumulative distribution
@@ -1238,17 +1385,25 @@ class TunableSA(Sampling):
     :type Sampling: _type_
     """
 
-    def __init__(self, data: np.ndarray, y: np.ndarray,
-                 x_inc: np.ndarray, it: int,
-                 vlim: np.ndarray, initial_temp=100,
-                 cooling_rate=0.99, max_iter=100,
-                 seed: int = 10000, weights: Any = None):
+    def __init__(
+        self,
+        data: np.ndarray,
+        y: np.ndarray,
+        x_inc: np.ndarray,
+        it: int,
+        vlim: np.ndarray,
+        initial_temp=100,
+        cooling_rate=0.99,
+        max_iter=100,
+        seed: int = 10000,
+        weights: Any = None,
+    ):
         """
         Initializer
         """
         self.n_r: int = 0
         self._msgs: List[List[str]] = []
-        rs = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(it+1)))  # pylint: disable=no-member
+        np.random.RandomState(np.random.MT19937(np.random.SeedSequence(it + 1)))  # pylint: disable=no-member
         self.it = it
         self.data: np.ndarray = copy.deepcopy(data)
         self.x_incumbent = copy.deepcopy(x_inc)
@@ -1267,17 +1422,31 @@ class TunableSA(Sampling):
         self._weights = np.atleast_1d(weights).astype(float)
         self._weights /= sum(self._weights) if sum(self._weights) > 0 else 1
         if self._weights.ndim != 1:
-            self._msgs.append([2, "`weights` passed in to the `activeSampling` \
-                                constructor should be on-diemsional vector."])
-            raise ValueError("`weights` passed in to the `activeSampling` \
-                                constructor should be on-diemsional vector.")
+            self._msgs.append(
+                [
+                    2,
+                    "`weights` passed in to the `activeSampling` \
+                                constructor should be on-diemsional vector.",
+                ]
+            )
+            raise ValueError(
+                "`weights` passed in to the `activeSampling` \
+                                constructor should be on-diemsional vector."
+            )
         if self._weights.shape[0] != self.n_d:
-            self._msgs.append([2, "`weights` passed in to the `activeSampling` \
+            self._msgs.append(
+                [
+                    2,
+                    "`weights` passed in to the `activeSampling` \
                                 constructor should have the same size of \
-                                the input `data` array."])
-            raise ValueError("`weights` passed in to the `activeSampling` \
-                                constructor should have the same size of the input `data` array.")
-        self._ne = 1/sum(self._weights**2)
+                                the input `data` array.",
+                ]
+            )
+            raise ValueError(
+                "`weights` passed in to the `activeSampling` \
+                                constructor should have the same size of the input `data` array."
+            )
+        self._ne = 1 / sum(self._weights**2)
 
         self.seed = seed
         self.var_limits = [[], []]
@@ -1305,9 +1474,10 @@ class TunableSA(Sampling):
     def target_distribution(self, x):
         """Multivariate Gaussian distribution."""
         mean = np.zeros(x.shape[0])  # Mean at the origin
-        cov = np.eye(x.shape[0])     # Identity covariance matrix (standard normal)
-        return (1 / np.sqrt((2 * np.pi)**len(x) * np.linalg.det(cov))) * \
-            np.exp(-0.5 * np.dot((x - mean), np.dot(np.linalg.inv(cov), (x - mean))))
+        cov = np.eye(x.shape[0])  # Identity covariance matrix (standard normal)
+        return (1 / np.sqrt((2 * np.pi) ** len(x) * np.linalg.det(cov))) * np.exp(
+            -0.5 * np.dot((x - mean), np.dot(np.linalg.inv(cov), (x - mean)))
+        )
 
     def get_neighbor(self, current_point, step_size=0.1):
         """
@@ -1318,8 +1488,9 @@ class TunableSA(Sampling):
 
     def acceptance_probability(self, temperature):
         """Accept with a probability that decreases as temperature lowers."""
-        return np.random.random() < \
-            math.exp(-1 / temperature)  # Example: random acceptance, depending on temperature
+        return np.random.random() < math.exp(
+            -1 / temperature
+        )  # Example: random acceptance, depending on temperature
 
     def simulated_annealing_sampling(self, size):
         """
@@ -1334,8 +1505,9 @@ class TunableSA(Sampling):
         # Sampling loop: perform for num_samples iterations
         for _ in range(self.n_s):
             # Generate a neighboring sample by perturbing each dimension
-            neighbor_point = self.get_neighbor(current_point,
-                                               min(self.var_limits[1]-self.var_limits[0])/10)
+            neighbor_point = self.get_neighbor(
+                current_point, min(self.var_limits[1] - self.var_limits[0]) / 10
+            )
 
             # Accept or reject the new point based on the acceptance criterion
             if self.acceptance_probability(temperature):
@@ -1347,8 +1519,10 @@ class TunableSA(Sampling):
             # Cool down the temperature
             temperature *= self.cooling_rate
 
-        spoints = [s*(self.var_limits[1, :] - self.var_limits[0, :]) -
-                   self.var_limits[0, :] for s in samples]
+        spoints = [
+            s * (self.var_limits[1, :] - self.var_limits[0, :]) - self.var_limits[0, :]
+            for s in samples
+        ]
         for i, _ in enumerate(spoints):
             for j, _ in enumerate(spoints[i]):
                 if spoints[i][j] < self.var_limits[0, j]:
@@ -1364,39 +1538,45 @@ class TunableSA(Sampling):
         self.seed = copy.deepcopy(seed)
         samples = self.simulated_annealing_sampling(size)
 
-        res = self.resample_multidimensional_variables(variables=samples,
-                                                       dimension_weights=self._weights,
-                                                       num_samples=size) \
-            if sum(self._weights) > 0 \
+        res = (
+            self.resample_multidimensional_variables(
+                variables=samples, dimension_weights=self._weights, num_samples=size
+            )
+            if sum(self._weights) > 0
             else samples
+        )
         # self.plotting(res)
         return res
 
     def plotting(self, data):
-        """ Plotting data points"""
+        """Plotting data points"""
 
         # Generate random data for 10-dimensional parameters (100 samples)
         num_dimensions = len(data[0])
 
         # Convert the data into a DataFrame for better handling with seaborn
-        df = pd.DataFrame(data, columns=[f"x{i+1}" for i in range(num_dimensions)])
+        df = pd.DataFrame(data, columns=[f"x{i + 1}" for i in range(num_dimensions)])
 
         # Create a pair plot (scatter plot matrix)
         sns.pairplot(df, height=2.5)
 
         # Show the plot
-        plt.suptitle(f"Pairwise Scatter Plot Matrix of {num_dimensions} Dimensions", y=1.02)
+        plt.suptitle(
+            f"Pairwise Scatter Plot Matrix of {num_dimensions} Dimensions", y=1.02
+        )
         plt.show()
 
-    def resample_multidimensional_variables(self, variables, dimension_weights, num_samples):
+    def resample_multidimensional_variables(
+        self, variables, dimension_weights, num_samples
+    ):
         """
-        Randomly resamples multidimensional variables based on 
+        Randomly resamples multidimensional variables based on
         the importance weight of each dimension.
 
         Parameters:
-        - variables: A 2D numpy array (N x D), where N is 
+        - variables: A 2D numpy array (N x D), where N is
         the number of variables and D is the number of dimensions.
-        - dimension_weights: A 1D numpy array of shape (D,), 
+        - dimension_weights: A 1D numpy array of shape (D,),
         representing the importance of each dimension.
         - num_samples: The number of variables to sample.
 
@@ -1421,8 +1601,9 @@ class TunableSA(Sampling):
             for i in range(len(variables)):
                 # Generate a random number between 0 and 1
                 # pylint: disable=no-member
-                rd = np.random.RandomState(np.random.MT19937(
-                    np.random.SeedSequence(self.it+i)))
+                rd = np.random.RandomState(
+                    np.random.MT19937(np.random.SeedSequence(self.it + i))
+                )
                 rand_value = rd.rand()
 
                 # Find the index where this random value fits within the cumulative distribution
@@ -1444,17 +1625,25 @@ class BayesianActiveSampling(Sampling):
     :type Sampling: _type_
     """
 
-    def __init__(self, data: np.ndarray, f_values: np.ndarray,
-                 n_r: int, vlim: np.ndarray, kernel_type: dict = {"Gaussian": 1},
-                 bw_method=TUNING_METHOD.SCOTT.name, seed: int = 10000,
-                 weights: Any = None, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray,
+        f_values: np.ndarray,
+        n_r: int,
+        vlim: np.ndarray,
+        kernel_type: dict = {"Gaussian": 1},
+        bw_method=TUNING_METHOD.SCOTT.name,
+        seed: int = 10000,
+        weights: Any = None,
+        h: List[float] = None,
+    ):
         self._data_training: np.ndarray = None
         self._data_testing: np.ndarray = None
         self._data_validating: np.ndarray = None
         self._f_training: np.ndarray = None
         self._f_testing: np.ndarray = None
         self._f_validating: np.ndarray = None
-        self._cov_decomp: str = 'svd'
+        self._cov_decomp: str = "svd"
         self.reducer: Reducers = None
         self.data_reduced: np.ndarray = None
         self.data_standardized: np.ndarray = None
@@ -1465,12 +1654,19 @@ class BayesianActiveSampling(Sampling):
         self._msgs: List[List[str]] = []
         self.n_s, self.n_d = self.data.shape
         if self.data is None or self.data.size <= 5:
-            self._msgs.append([2, "`data` passed in to the `activeSampling` "
-                               "constructor should include multiple sample points, "
-                               "at least five sample points."])
-            raise ValueError("`data` passed in to the `activeSampling` "
-                             "constructor should include multiple sample points, "
-                             "at least five sample points.")
+            self._msgs.append(
+                [
+                    2,
+                    "`data` passed in to the `activeSampling` "
+                    "constructor should include multiple sample points, "
+                    "at least five sample points.",
+                ]
+            )
+            raise ValueError(
+                "`data` passed in to the `activeSampling` "
+                "constructor should include multiple sample points, "
+                "at least five sample points."
+            )
 
         self.n_r = n_r
 
@@ -1478,14 +1674,26 @@ class BayesianActiveSampling(Sampling):
             self._weights = np.atleast_1d(weights).astype(float)
             self._weights /= sum(self._weights)
             if not self._weights.ndim == 1:
-                self._msgs.append([2, "`weights` passed in to the `activeSampling` "
-                                   "constructor should be on-diemsional vector."])
+                self._msgs.append(
+                    [
+                        2,
+                        "`weights` passed in to the `activeSampling` "
+                        "constructor should be on-diemsional vector.",
+                    ]
+                )
             if not len(self._weights) == self.n_s:
-                self._msgs.append([2, "`weights` passed in to the `activeSampling` "
-                                   "constructor should have the same size of the input `data` array."])
-                raise ValueError("`weights` passed in to the `activeSampling` "
-                                 "constructor should have the same size of the input `data` array.")
-            self._ne = 1/sum(self._weights**2)
+                self._msgs.append(
+                    [
+                        2,
+                        "`weights` passed in to the `activeSampling` "
+                        "constructor should have the same size of the input `data` array.",
+                    ]
+                )
+                raise ValueError(
+                    "`weights` passed in to the `activeSampling` "
+                    "constructor should have the same size of the input `data` array."
+                )
+            self._ne = 1 / sum(self._weights**2)
         else:
             self._weights = None
 
@@ -1511,21 +1719,44 @@ class BayesianActiveSampling(Sampling):
         for k in kernel_type.keys():
             if k in self.kernel_funcs.keys():
                 kf = self.kernel_funcs.get(k)
-                self.kernel.append(kf(data=data_training, weights=self._weights,
-                                      bw_method=bw_method, h=h))
+                self.kernel.append(
+                    kf(
+                        data=data_training,
+                        weights=self._weights,
+                        bw_method=bw_method,
+                        h=h,
+                    )
+                )
             else:
-                self._msgs.append([1, "Unknown kernel type. "
-                                   "Switched to the default Gaussian kernel."])
-                self.kernel.append(Gaussian(data=data_training,
-                                            weights=self._weights, bw_method=bw_method, h=h))
+                self._msgs.append(
+                    [1, "Unknown kernel type. Switched to the default Gaussian kernel."]
+                )
+                self.kernel.append(
+                    Gaussian(
+                        data=data_training,
+                        weights=self._weights,
+                        bw_method=bw_method,
+                        h=h,
+                    )
+                )
 
-    def split_dataset(self, xf, y, train_ratio=0.9, val_ratio=0.0,
-                      test_ratio=0.1, shuffle=True, random_seed=None):
+    def split_dataset(
+        self,
+        xf,
+        y,
+        train_ratio=0.9,
+        val_ratio=0.0,
+        test_ratio=0.1,
+        shuffle=True,
+        random_seed=None,
+    ):
         """
         Split the data set into training, testing and validation data sets
         """
         assert len(xf) == len(y), "X and y must have the same number of samples."
-        assert np.isclose(train_ratio + val_ratio + test_ratio, 1.0), "Ratios must sum to 1."
+        assert np.isclose(train_ratio + val_ratio + test_ratio, 1.0), (
+            "Ratios must sum to 1."
+        )
 
         n_samples = xf.shape[0]
 
@@ -1548,7 +1779,9 @@ class BayesianActiveSampling(Sampling):
         # Apply splits to X and y
         self._data_training, self._f_training = xf[train_idx], y[train_idx]
         self._data_training = np.vstack((self._data_training, self.data[-1]))
-        self._f_training = np.concatenate((self._f_training, np.array([self.f_values[-1]])))
+        self._f_training = np.concatenate(
+            (self._f_training, np.array([self.f_values[-1]]))
+        )
         self._data_validating, self._f_validating = xf[val_idx], y[val_idx]
         self._data_testing, self._f_testing = xf[test_idx], y[test_idx]
 
@@ -1582,7 +1815,7 @@ class BayesianActiveSampling(Sampling):
 
         total_weight = sum(weights)
         if total_weight == 0:
-            return float('inf'), float('inf')
+            return float("inf"), float("inf")
 
         mean = sum(w * f for w, f in zip(weights, f_values)) / total_weight
         var = sum(w * (f - mean) ** 2 for w, f in zip(weights, f_values)) / total_weight
@@ -1610,9 +1843,9 @@ class BayesianActiveSampling(Sampling):
         mu = []
         var = []
         for i, x in enumerate(self._data_testing):
-            f_mean_t, f_var_t = self.estimate_local_f_and_uncertainty(x.tolist(),
-                                                                      self._f_testing,
-                                                                      self._data_testing)
+            f_mean_t, f_var_t = self.estimate_local_f_and_uncertainty(
+                x.tolist(), self._f_testing, self._data_testing
+            )
             mu.append(f_mean_t)
             var.append(f_var_t)
         return mu, var
@@ -1621,7 +1854,9 @@ class BayesianActiveSampling(Sampling):
         """
         Acquisition function
         """
-        f_mean, f_var = self.estimate_local_f_and_uncertainty(x, f_values, self._data_training)
+        f_mean, f_var = self.estimate_local_f_and_uncertainty(
+            x, f_values, self._data_training
+        )
         f_mean_t, _ = self.estimate_testing_dataset()
         tw = TrustWorthiness(ref=f_mean_t, pred=self._f_testing)
         corr_mean = tw.kendalltau_b_fast()
@@ -1634,10 +1869,15 @@ class BayesianActiveSampling(Sampling):
         return adjusted_ei, f_mean, f_std
 
     @classmethod
-    def kde_resample(cls, ks: List[KERNEL], weights: List[float],
-                     base_point: List[float], dim_weights: List[float] = None):
+    def kde_resample(
+        cls,
+        ks: List[KERNEL],
+        weights: List[float],
+        base_point: List[float],
+        dim_weights: List[float] = None,
+    ):
         """
-        Resample using inferred distributions by introduced KDEs for a given dataset 
+        Resample using inferred distributions by introduced KDEs for a given dataset
         """
         # Select kernel based on weighted probability
         kernel = random.choices(ks, weights=weights)[0]
@@ -1660,9 +1900,12 @@ class BayesianActiveSampling(Sampling):
         upper_bounds = np.array([x[1] for x in self.var_limits])
         for _ in range(n_samples):
             base = incumbents[np.random.randint(len(incumbents))]
-            sample = self.kde_resample(ks=self.kernel, weights=[self.kernels[v] for
-                                                                v in self.kernels.keys()],
-                                       base_point=base, dim_weights=dim_weights)
+            sample = self.kde_resample(
+                ks=self.kernel,
+                weights=[self.kernels[v] for v in self.kernels.keys()],
+                base_point=base,
+                dim_weights=dim_weights,
+            )
             if lower_bounds is not None and upper_bounds is not None:
                 for i, _ in enumerate(sample):
                     sample[i] = np.clip(sample[i], lower_bounds[i], upper_bounds[i])[0]
@@ -1698,8 +1941,6 @@ class BayesianActiveSampling(Sampling):
         ensemble = AdaptiveEnsemble(models)
         ensemble.fit(x, y)
 
-        best_ei = -np.inf
-
         for iteration in range(n_iterations):
             n_inc = max(1, len(x))
             inc_idx = np.argsort(y)[:n_inc]
@@ -1709,10 +1950,15 @@ class BayesianActiveSampling(Sampling):
             # sens_vars: TrustWorthiness = TrustWorthiness(x, y)
             dim_weights = compute_dimension_relevance(X=x, y=y, top_k=n_inc)
 
-            candidates = self.resample_near_incumbents(dim_weights=dim_weights,
-                                                       incumbents=incumbents)
-            acq_vals = np.array([
-                self.adjusted_expected_improvement(xc, ensemble, f_best) for xc in candidates])
+            candidates = self.resample_near_incumbents(
+                dim_weights=dim_weights, incumbents=incumbents
+            )
+            acq_vals = np.array(
+                [
+                    self.adjusted_expected_improvement(xc, ensemble, f_best)
+                    for xc in candidates
+                ]
+            )
 
             best_x = candidates[np.argmax(acq_vals)]
             unc = ensemble.uncertainty(best_x)
@@ -1721,9 +1967,11 @@ class BayesianActiveSampling(Sampling):
             z_score = [abs(zi) for zi in z]
             # err_t = ensemble.calculate_testing_error(self._data_testing, self._f_testing)
             # or 1 < np.mean(np.array(z_score)) or np.mean(np.array(z_score)) < 0:
-            if np.isnan(unc) or np.isinf(unc) \
-                or (abs(unc/best_y) > 1
-                    and sum(z_score)/len(z_score) > 2):
+            if (
+                np.isnan(unc)
+                or np.isinf(unc)
+                or (abs(unc / best_y) > 1 and sum(z_score) / len(z_score) > 2)
+            ):
                 continue
             # x = np.vstack([x, best_x])
             # y = np.append(y, best_y)
@@ -1733,8 +1981,9 @@ class BayesianActiveSampling(Sampling):
 
         return x_best, y_best
 
-    def resample_with_ei(self, f_values, best_fx, ei_threshold=0.01,
-                         num_samples=1, max_attempts=1000):
+    def resample_with_ei(
+        self, f_values, best_fx, ei_threshold=0.01, num_samples=1, max_attempts=1000
+    ):
         """
         Resample using EI criterion
         """
@@ -1742,8 +1991,6 @@ class BayesianActiveSampling(Sampling):
         attempts = 0
         f_est_best = np.inf
         while len(accepted) < num_samples and attempts < max_attempts:
-            base = random.choice(self._data_training)
-            noise = [random.gauss(0, self.bandwidth) for _ in range(self.n_d)]
             candidate = self.resample_near_incumbents()
             ei, f_est, f_std = self.acquisition_ei(candidate, f_values, best_fx)
             if ei >= ei_threshold and f_est <= f_est_best:
@@ -1752,8 +1999,9 @@ class BayesianActiveSampling(Sampling):
             attempts += 1
         return accepted
 
-    def resample(self, size: int = None, seed: int = None,
-                 display: bool = False) -> np.ndarray:
+    def resample(
+        self, size: int = None, seed: int = None, display: bool = False
+    ) -> np.ndarray:
         """
         Resample using BO and KDE models
         """
@@ -1768,14 +2016,16 @@ class BayesianActiveSampling(Sampling):
             # LocalPolynomialRegression(bandwidth=bw,kw_calculator=self._combined_kernel),
             # GPWithMixedKernel(bandwidth=bw, kw_calculator=self._combined_kernel),
             # MDNInspired(bandwidth=bw, kw_calculator=self._combined_kernel),
-            KNNKernelWeighted(k=self._data_training.shape[0],
-                              bandwidth=bw, kw_calculator=self._combined_kernel)
+            KNNKernelWeighted(
+                k=self._data_training.shape[0],
+                bandwidth=bw,
+                kw_calculator=self._combined_kernel,
+            ),
         ]
 
-        new_samples, best_fx = \
-            self.bayesian_optimization_ensemble(models=models,
-                                                name=GPWithMixedKernel.__name__,
-                                                n_iterations=size)
+        new_samples, best_fx = self.bayesian_optimization_ensemble(
+            models=models, name=GPWithMixedKernel.__name__, n_iterations=size
+        )
         if display:
             print("\n🔍 Final best observed f(x):", new_samples)
         return np.array(new_samples)
@@ -1798,10 +2048,18 @@ class TPE(Sampling):
     Tree of Parzen estimators base class
     """
 
-    def __init__(self, good_data: np.ndarray, good_f_values: np.ndarray,
-                 bad_data: np.ndarray, bad_f_values: np.ndarray,
-                 n_r: int, vlim: np.ndarray, kernel_type: dict = {"Gaussian": 1},
-                 seed: int = 10000, gamma=0.25):
+    def __init__(
+        self,
+        good_data: np.ndarray,
+        good_f_values: np.ndarray,
+        bad_data: np.ndarray,
+        bad_f_values: np.ndarray,
+        n_r: int,
+        vlim: np.ndarray,
+        kernel_type: dict = {"Gaussian": 1},
+        seed: int = 10000,
+        gamma=0.25,
+    ):
         self._msgs: List[List[str]] = []
         self.kernel_funcs: Dict = KernelFunctions().kfs
         self.kernel: List[KERNEL] = []
@@ -1833,9 +2091,13 @@ class TPE(Sampling):
             # if size is None:
             #     size = int(kernels[i]._ne)
             for s_vec in samples_vecs:
-                kde.append(kernels[i].kf_multivar(
-                    np.array([candidate[i] - s_vec[i]
-                              for i in range(len(candidate))])))
+                kde.append(
+                    kernels[i].kf_multivar(
+                        np.array(
+                            [candidate[i] - s_vec[i] for i in range(len(candidate))]
+                        )
+                    )
+                )
             kdes.append(kde)
 
         # Average the densities for sampling
@@ -1852,14 +2114,16 @@ class TPE(Sampling):
 
     def resample(self, size, seed, scale):
         """
-        Resample using inferred distributions of the given dataset 
+        Resample using inferred distributions of the given dataset
         """
         return self._suggest()
 
     @classmethod
-    def kde_resample(cls, ks: List[KERNEL], weights: List[float], data: List[List[float]]):
+    def kde_resample(
+        cls, ks: List[KERNEL], weights: List[float], data: List[List[float]]
+    ):
         """
-        Resample using inferred distributions by introduced KDEs for a given dataset 
+        Resample using inferred distributions by introduced KDEs for a given dataset
         """
         base_point = random.choice(data)
         # Select kernel based on weighted probability
@@ -1889,20 +2153,40 @@ class BiTPE(TPE):
     Binary tree of Parzen estimators
     """
 
-    def __init__(self, good_data: np.ndarray, good_f_values: np.ndarray,
-                 bad_data: np.ndarray, bad_f_values: np.ndarray,
-                 kernel_type: Dict = {"Gaussian": 1}, n_r: int = 0,
-                 vlim: np.ndarray = None, bw_method=TUNING_METHOD.MLCV.name,
-                 seed=10000, weights: Any = None, h: List[float] = None,
-                 gamma=0.25):
-        super().__init__(good_data=good_data, good_f_values=good_f_values, bad_data=bad_data,
-                         bad_f_values=bad_f_values,
-                         kernel_type=kernel_type, n_r=n_r,
-                         vlim=vlim, seed=seed, gamma=gamma)
+    def __init__(
+        self,
+        good_data: np.ndarray,
+        good_f_values: np.ndarray,
+        bad_data: np.ndarray,
+        bad_f_values: np.ndarray,
+        kernel_type: Dict = {"Gaussian": 1},
+        n_r: int = 0,
+        vlim: np.ndarray = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        seed=10000,
+        weights: Any = None,
+        h: List[float] = None,
+        gamma=0.25,
+    ):
+        super().__init__(
+            good_data=good_data,
+            good_f_values=good_f_values,
+            bad_data=bad_data,
+            bad_f_values=bad_f_values,
+            kernel_type=kernel_type,
+            n_r=n_r,
+            vlim=vlim,
+            seed=seed,
+            gamma=gamma,
+        )
         self._rank_data_and_initialize_kernels(weights, bw_method, h)
 
-    def _rank_data_and_initialize_kernels(self, bw_method=TUNING_METHOD.SCOTT.name,
-                                          h: List[float] = None, weights: Any = None):
+    def _rank_data_and_initialize_kernels(
+        self,
+        bw_method=TUNING_METHOD.SCOTT.name,
+        h: List[float] = None,
+        weights: Any = None,
+    ):
         inc_idx = np.argsort(self.good_f_values)
         self.good_obs = self.good_data[inc_idx]
         inc_idx = np.argsort(self.bad_f_values)
@@ -1913,28 +2197,46 @@ class BiTPE(TPE):
         for k in self.kernels.keys():
             if k in self.kernel_funcs.keys():
                 kf = self.kernel_funcs.get(k)
-                self.good_kernel.append(kf(data=self.good_obs,
-                                           weights=self._weights,
-                                           bw_method=bw_method, h=h))
+                self.good_kernel.append(
+                    kf(
+                        data=self.good_obs,
+                        weights=self._weights,
+                        bw_method=bw_method,
+                        h=h,
+                    )
+                )
                 self.good_kernel[-1]._calc_covariance()
-                self.bad_kernel.append(kf(data=self.bad_obs,
-                                          weights=self._weights,
-                                          bw_method=bw_method, h=h))
+                self.bad_kernel.append(
+                    kf(
+                        data=self.bad_obs,
+                        weights=self._weights,
+                        bw_method=bw_method,
+                        h=h,
+                    )
+                )
             else:
-                self._msgs.append([1, "Unknown kernel type. "
-                                   "Switched to the default Gaussian kernel."])
-                self.good_kernel.append(Gaussian(data=self.good_obs,
-                                                 weights=self._weights,
-                                                 bw_method=bw_method, h=h))
-                self.bad_kernel.append(Gaussian(data=self.bad_obs,
-                                                weights=self._weights,
-                                                bw_method=bw_method, h=h))
+                self._msgs.append(
+                    [1, "Unknown kernel type. Switched to the default Gaussian kernel."]
+                )
+                self.good_kernel.append(
+                    Gaussian(
+                        data=self.good_obs,
+                        weights=self._weights,
+                        bw_method=bw_method,
+                        h=h,
+                    )
+                )
+                self.bad_kernel.append(
+                    Gaussian(
+                        data=self.bad_obs,
+                        weights=self._weights,
+                        bw_method=bw_method,
+                        h=h,
+                    )
+                )
 
     def _suggest(self):
-
         # Calculate bandwidths per dimension
-        bw_good = [k.tune_bw() for k in self.good_kernel]
-        bw_bad = [k.tune_bw() for k in self.bad_kernel]
 
         # 2. Sample candidates and maximize l(x)/g(x)
         best_ratio = 1
@@ -1943,7 +2245,7 @@ class BiTPE(TPE):
         candidates = []
         for _ in range(self.n_r):
             # Sample from the 'good' GMM (pick a point and add Gaussian noise)
-            random.seed(self.seed+sc)
+            random.seed(self.seed + sc)
             sc += 1
             # base_vec = self.good_obs[0]
             if len(candidates) >= self.n_r:
@@ -1953,11 +2255,11 @@ class BiTPE(TPE):
                 # sigma = (ub - lb) / np.sqrt(len(self.good_obs))
                 # val = random.normalvariate(base_vec[i],  sigma)
                 # val = max(lb, min(ub, val))  # Clip
-            candidates += \
-                self.kde_resample(ks=self.good_kernel,
-                                  weights=[self.kernels[k]
-                                           for k in self.kernels.keys()],
-                                  data=self.good_data)
+            candidates += self.kde_resample(
+                ks=self.good_kernel,
+                weights=[self.kernels[k] for k in self.kernels.keys()],
+                data=self.good_data,
+            )
 
             # Calculate densities
         for candidate_vec in candidates:

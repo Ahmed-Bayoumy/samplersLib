@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from collections import Counter
-from samplersLib.importance import RandomForest, DecisionTree
+from samplersLib.importance import RandomForest
 
 # ----------------------------------------------------------------------
 # Helper fixtures

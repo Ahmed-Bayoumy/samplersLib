@@ -23,16 +23,21 @@
 #  Copyright (C) 2026  Ahmed H. Bayoumy                                               #
 # ------------------------------------------------------------------------------------#
 """
-import random
-from typing import Any, Callable
+
 import copy
+import random
 from abc import ABC, abstractmethod
+from typing import Any, Callable, List
+
 import numpy as np
-from ._common import *
+import plotly.express as px
+
+from ._common import KERNEL_TYPE, TUNING_METHOD
 
 
 class Kernel(ABC):
-    """ Base class for kernel functions """
+    """Base class for kernel functions"""
+
     _ns: int = 0
     _nd: int = 0
     data: np.ndarray = None
@@ -59,18 +64,21 @@ class Kernel(ABC):
     _type: KERNEL_TYPE = KERNEL_TYPE.NONPARAMETRIC
     _calculate_bw: bool = True
 
-    def __init__(self,
-                 data: np.ndarray = None,
-                 x: np.ndarray = None,
-                 h: List[float] = 0.1,
-                 std_dev: float = None,
-                 weights: Any = None,
-                 res: int = 101,
-                 est_pdf: np.ndarray = None,
-                 vlim: np.ndarray = None,
-                 bw_method: str = None,
-                 is_debugging: bool = False, calculate_bw=True):
-        """ Protocol class for kernel functions """
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        x: np.ndarray = None,
+        h: List[float] = 0.1,
+        std_dev: float = None,
+        weights: Any = None,
+        res: int = 101,
+        est_pdf: np.ndarray = None,
+        vlim: np.ndarray = None,
+        bw_method: str = None,
+        is_debugging: bool = False,
+        calculate_bw=True,
+    ):
+        """Protocol class for kernel functions"""
         self._ns: int = 0
         self._nd: int = 0
         self.data: np.ndarray = data
@@ -106,14 +114,13 @@ class Kernel(ABC):
         return self._type
 
     def _generate_nd_grid(self):
-        """_summary_
-        """
+        """_summary_"""
         pt = []
         for i in range(self._nd):
             pt.append(np.linspace(self.vlim[i, 0], self.vlim[i, 1], int(self._ne)).T)
 
         self._points = np.vstack(np.meshgrid(*pt)).reshape(len(pt), -1).T
-        self._points = self._points[:self._ne, :]
+        self._points = self._points[: self._ne, :]
 
     def _calc_kf_per_dp(self, x, xi):
         """_summary_
@@ -149,12 +156,12 @@ class Kernel(ABC):
         for xi in self.data:
             xi = np.asarray(xi)
             bw.append(self._calc_kf_per_dp(x, xi))
-        return sum(bw)/len(bw)
+        return sum(bw) / len(bw)
 
     def tune_bandwidth_mlcv(self, h_min=0.1, h_max=2.0, steps=20):
         """Finds the h that maximizes MLCV score via grid search."""
         best_h = h_min
-        max_score = -float('inf')
+        max_score = -float("inf")
 
         for i in range(steps):
             # Linear search across the range
@@ -203,7 +210,7 @@ class Kernel(ABC):
         :return: _description_
         :rtype: _type_
         """
-        return np.power(self._ns, -1./(self._nd+4))
+        return np.power(self._ns, -1.0 / (self._nd + 4))
 
     def _silverman(self):
         """_summary_
@@ -211,7 +218,7 @@ class Kernel(ABC):
         :return: _description_
         :rtype: _type_
         """
-        return np.power(self._ns*(self._nd+2.0)/4.0, -1./(self._nd+4))
+        return np.power(self._ns * (self._nd + 2.0) / 4.0, -1.0 / (self._nd + 4))
 
     def bounded(self, f, u):
         """_summary_
@@ -240,19 +247,17 @@ class Kernel(ABC):
             column = [row[j] for row in self.data]
             mean = sum(column) / n
             variance = sum((x - mean) ** 2 for x in column) / (n - 1)
-            stdev.append(variance ** 0.5)
+            stdev.append(variance**0.5)
             bandwidths.append(h * stdev[-1])
         return bandwidths, stdev
 
     def bw_scott(self):
-        """_summary_
-        """
+        """_summary_"""
         h = self._scott()
         self.h, self.std_dev = self._bw_calc(h)
 
     def bw_silverman(self):
-        """_summary_
-        """
+        """_summary_"""
         h = self._silverman()
         self.h, self.std_dev = self._bw_calc(h)
 
@@ -267,7 +272,7 @@ class Kernel(ABC):
         for j in range(d):
             col = [row[j] for row in self.data]
             mean = sum(col) / n
-            var = sum((x - mean)**2 for x in col) / (n - 1)
+            var = sum((x - mean) ** 2 for x in col) / (n - 1)
             stds.append(np.sqrt(var))
         return stds
 
@@ -294,14 +299,12 @@ class Kernel(ABC):
             self.bw_mlcv()
 
     def bw_mlcv(self):
-        """_summary_
-        """
+        """_summary_"""
         self.tune_bandwidth_mlcv()
 
     def loo_log_likelihood(self, h):
         """Calculates the Leave-One-Out Log-Likelihood for a given bandwidth h."""
         n = len(self.data)
-        d = len(self.data[0]) if isinstance(self.data[0], (list, tuple)) else 1
         total_log_lik = 0
 
         for i in range(n):
@@ -310,8 +313,7 @@ class Kernel(ABC):
             self.set_bw(TUNING_METHOD.MLCV.name)
             xi = np.asarray(self.data[i])
             prob_i = sum(
-                self._calc_kf_per_dp(self.data, xi)
-                for j in range(n) if i != j
+                self._calc_kf_per_dp(self.data, xi) for j in range(n) if i != j
             ) / (n - 1)
 
             # Avoid log(0)
@@ -319,7 +321,7 @@ class Kernel(ABC):
 
         return total_log_lik / n
 
-# TODO: Check if no longer needed
+    # TODO: Check if no longer needed
     # def _select_sigma(self, x):
     #     normalizer = 1.349
     #     iqr = (stats.scoreatpercentile(x, 75) - stats.scoreatpercentile(x, 25)) / normalizer
@@ -327,24 +329,23 @@ class Kernel(ABC):
     #     return np.minimum(std_dev, iqr) if iqr > 0 else std_dev
 
     def _calc_covariance(self):
-        """ Computes the covariance matrix for each kernel using 
-        the kernel BW (covariance factor). """
+        """Computes the covariance matrix for each kernel using
+        the kernel BW (covariance factor)."""
         try:
             self._factor = self._covariance_factor()
 
             if self._data_inv_cov is None:
                 if self.weights is None:
-                    self.weights = np.ones(self._ns)/self._ns
-                self._data_cov = np.atleast_2d(np.cov(self.data.T,
-                                                      rowvar=1,
-                                                      bias=True,
-                                                      aweights=self.weights))
+                    self.weights = np.ones(self._ns) / self._ns
+                self._data_cov = np.atleast_2d(
+                    np.cov(self.data.T, rowvar=1, bias=True, aweights=self.weights)
+                )
                 self._data_inv_cov = np.linalg.inv(self._data_cov)
 
             self._cov = self._data_cov * self._factor**2
             self.is_debugging = False
             if self.is_debugging:
-                labs = [f'x{i}' for i in range(self._nd)]
+                labs = [f"x{i}" for i in range(self._nd)]
                 # sns.heatmap(self._cov, annot=True, fmt='g', xticklabels=labs, yticklabels=labs)
                 fig = px.imshow(self._cov, text_auto=True, x=labs, y=labs)
                 fig.show()
@@ -352,7 +353,7 @@ class Kernel(ABC):
             self._inv_cov = self._data_inv_cov / self._factor**2
             # L = np.linalg.cholesky(self._cov*2*np.pi)
             # self._log_det = 2*np.log(np.diag(L)).sum()
-        except:
+        except Exception:
             self._data_cov = None
             self._data_inv_cov = None
             self._cov = None
@@ -383,8 +384,11 @@ class Kernel(ABC):
         else:
             self._points = points
 
-        return self.get_ke_non_param() if self._type == KERNEL_TYPE.NONPARAMETRIC \
+        return (
+            self.get_ke_non_param()
+            if self._type == KERNEL_TYPE.NONPARAMETRIC
             else self.get_ke_param()
+        )
 
     def get_ke_non_param(self):
         """_summary_
@@ -398,11 +402,11 @@ class Kernel(ABC):
         for i in range(self._ns):
             ei = np.atleast_1d(np.zeros((self._points.shape[0])))
             for j in range(self._points.shape[0]):
-                z: np.ndarray = (self._points[j, :]-self.data[i, :])
+                z: np.ndarray = self._points[j, :] - self.data[i, :]
                 ei[j] = self.kf_multivar(z)
-            self.est_pdf += ei/self._points.shape[0]
+            self.est_pdf += ei / self._points.shape[0]
 
-        self.est_pdf = np.atleast_1d(abs(self.est_pdf)/sum(abs(self.est_pdf)))
+        self.est_pdf = np.atleast_1d(abs(self.est_pdf) / sum(abs(self.est_pdf)))
 
         return np.asarray(self.est_pdf)
 
@@ -418,11 +422,11 @@ class Kernel(ABC):
         for i in range(self._ns):
             ei = np.atleast_1d(np.zeros((self._points.shape[0])))
             for j in range(self._points.shape[0]):
-                z: np.ndarray = (self._points[j, :]-self.data[i, :])
+                z: np.ndarray = self._points[j, :] - self.data[i, :]
                 ei[j] = self.kf_multivar(z)
-            self.est_pdf += ei/self._points.shape[0]
+            self.est_pdf += ei / self._points.shape[0]
 
-        self.est_pdf = np.atleast_1d(abs(self.est_pdf)/sum(abs(self.est_pdf)))
+        self.est_pdf = np.atleast_1d(abs(self.est_pdf) / sum(abs(self.est_pdf)))
 
         return np.asarray(self.est_pdf)
 
@@ -437,27 +441,43 @@ class Kernel(ABC):
         # 1. Infinite Support Kernels
         if kernel_name == "gaussian" or kernel_name == "gaussianrbf":
             # Box-Muller for Normal Distribution
-            return [h * np.sqrt(-2 * np.log(random.random())) *
-                    np.cos(2 * np.pi * random.random()) for _ in range(self._nd)]
+            return [
+                h
+                * np.sqrt(-2 * np.log(random.random()))
+                * np.cos(2 * np.pi * random.random())
+                for _ in range(self._nd)
+            ]
 
         elif kernel_name == "cauchy":
             # Inverse Transform Sampling: h * tan(pi * (U - 0.5))
-            return [h * np.tan(np.pi * (random.random() - 0.5)) for _ in range(self._nd)]
+            return [
+                h * np.tan(np.pi * (random.random() - 0.5)) for _ in range(self._nd)
+            ]
 
         elif kernel_name == "laplace":
             # Difference of two exponentials
-            return [h * (np.log(random.random()) -
-                         np.log(random.random())) for _ in range(self._nd)]
+            return [
+                h * (np.log(random.random()) - np.log(random.random()))
+                for _ in range(self._nd)
+            ]
 
         elif kernel_name == "logistic":
             # h * log(U / (1-U))
-            return [h * np.log(u / (1 - u))
-                    if (u := random.random()) else 0 for _ in range(self._nd)]
+            return [
+                h * np.log(u / (1 - u)) if (u := random.random()) else 0
+                for _ in range(self._nd)
+            ]
 
         # 2. Compact Support Kernels (Bounded within [-h, h])
         # Using Rejection Sampling for complex shapes
-        elif kernel_name in ["epanechnikov", "biweight", "triweight",
-                             "tricube", "cosine", "uniformrectangular"]:
+        elif kernel_name in [
+            "epanechnikov",
+            "biweight",
+            "triweight",
+            "tricube",
+            "cosine",
+            "uniformrectangular",
+        ]:
             noise = []
             for _ in range(self._nd):
                 passed = False
@@ -466,13 +486,13 @@ class Kernel(ABC):
                     if kernel_name == "epanechnikov":
                         passed = v <= (0.75 * (1 - u**2))
                     elif kernel_name == "biweight":
-                        passed = v <= (15/16 * (1 - u**2)**2)
+                        passed = v <= (15 / 16 * (1 - u**2) ** 2)
                     elif kernel_name == "triweight":
-                        passed = v <= (35/32 * (1 - u**2)**3)
+                        passed = v <= (35 / 32 * (1 - u**2) ** 3)
                     elif kernel_name == "tricube":
-                        passed = v <= (70/81 * (1 - abs(u)**3)**3)
+                        passed = v <= (70 / 81 * (1 - abs(u) ** 3) ** 3)
                     elif kernel_name == "cosine":
-                        passed = v <= (np.pi/4 * np.cos(np.pi/2 * u))
+                        passed = v <= (np.pi / 4 * np.cos(np.pi / 2 * u))
                     elif kernel_name == "uniformrectangular":
                         passed = True
                     if passed:
@@ -506,7 +526,7 @@ class Gaussian(Kernel):
         point: np.ndarray = None,
         n_r: int = 0,
         h: List[float] = None,
-        calculate_bw=True
+        calculate_bw=True,
     ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
@@ -546,12 +566,14 @@ class Gaussian(Kernel):
 
         # Fallback: Diagonal bandwidth assumption
         if self.h is None:
-            raise ValueError("Bandwidth `h` must be set for fallback multivariate kernel.")
+            raise ValueError(
+                "Bandwidth `h` must be set for fallback multivariate kernel."
+            )
 
         h_arr = np.asarray(self.h)
         scaled_z = z / h_arr
         norm_const = np.prod(1 / (np.sqrt(2 * np.pi) * h_arr))
-        return norm_const * np.exp(-0.5 * np.sum(scaled_z ** 2))
+        return norm_const * np.exp(-0.5 * np.sum(scaled_z**2))
 
 
 class Cauchy(Kernel):
@@ -571,7 +593,7 @@ class Cauchy(Kernel):
         point: np.ndarray = None,
         n_r: int = 0,
         h: List[float] = None,
-        calculate_bw: bool = True
+        calculate_bw: bool = True,
     ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
@@ -607,11 +629,13 @@ class Cauchy(Kernel):
                 return 1.0 / ((1.0 + quad_form) ** ((self._nd + 1) / 2.0))
 
         if self.h is None:
-            raise ValueError("Bandwidth `h` must be set for fallback multivariate kernel.")
+            raise ValueError(
+                "Bandwidth `h` must be set for fallback multivariate kernel."
+            )
 
         h_arr = np.asarray(self.h)
         scaled_z = z / h_arr
-        quad_form = np.sum(scaled_z ** 2)
+        quad_form = np.sum(scaled_z**2)
         return (1 / (np.pi * (1 + scaled_z**2))).mean()
 
 
@@ -622,16 +646,23 @@ class Epanechnikov(Kernel):
     :type Kernel: _type_
     """
 
-    def __init__(self, data: np.ndarray = None, vlim=None, res: int = 101,
-                 weights: Any = None, bw_method=TUNING_METHOD.MLCV.name,
-                 point: np.ndarray = None, h: List[float] = None,
-                 calculate_bw: bool = True):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+        calculate_bw: bool = True,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -640,12 +671,17 @@ class Epanechnikov(Kernel):
         self._calculate_bw = calculate_bw
         if self._cov is None and self._calculate_bw:
             self.set_bw(method=bw_method)
+
     """ Epanechnikov kernel function """
 
     def kf_univar(self, u):
         # return self.bounded((3 / 4 * (1 - u * u)), u)
-        h = self.h[0] if (isinstance(self.h, list)
-                          or isinstance(self.h, np.ndarray)) and len(self.h) == 1 else self.h
+        h = (
+            self.h[0]
+            if (isinstance(self.h, list) or isinstance(self.h, np.ndarray))
+            and len(self.h) == 1
+            else self.h
+        )
         return (3 / (4 * h)) * (1 - ((u) / h) ** 2) * (np.abs(u) < h)
 
     def kf_multivar(self, u):
@@ -667,16 +703,17 @@ class Laplace(Kernel):
     :type Kernel: _type_
     """
 
-    def __init__(self,
-                 data: np.ndarray = None,
-                 vlim=None,
-                 res: int = 101,
-                 weights: Any = None,
-                 bw_method: str = "MLCV",
-                 point: np.ndarray = None,
-                 h: List[float] = None,
-                 calculate_bw: bool = True):
-
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method: str = "MLCV",
+        point: np.ndarray = None,
+        h: List[float] = None,
+        calculate_bw: bool = True,
+    ):
         if data is not None:
             self.data = np.atleast_2d(copy.deepcopy(data))
             self._ns = self.data.shape[0]  # num samples
@@ -693,7 +730,9 @@ class Laplace(Kernel):
         self.vlim = np.atleast_2d(vlim) if vlim is not None else None
         self.bw_method = bw_method
         self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = np.array(h) if h is not None else np.ones(self._nd)  # fallback bandwidth
+        self.h = (
+            np.array(h) if h is not None else np.ones(self._nd)
+        )  # fallback bandwidth
         self._calculate_bw = calculate_bw
         if self._cov is None and self._calculate_bw:
             self.set_bw(method=bw_method)
@@ -711,17 +750,24 @@ class Laplace(Kernel):
 
 
 class Cosine(Kernel):
-    """ Cosine kernel function """
+    """Cosine kernel function"""
 
-    def __init__(self, data: np.ndarray = None, vlim=None, res: int = 101, weights: Any = None,
-                 bw_method=TUNING_METHOD.MLCV.name, point: np.ndarray = None,
-                 h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -729,27 +775,41 @@ class Cosine(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        h = self.h[0] if (isinstance(self.h, list) or isinstance(self.h, np.ndarray)) \
-            and len(self.h) == 1 else self.h
+        h = (
+            self.h[0]
+            if (isinstance(self.h, list) or isinstance(self.h, np.ndarray))
+            and len(self.h) == 1
+            else self.h
+        )
         return self.bounded((1 / (2 * h)) * np.cos(np.pi * u / h), u=u)
 
     def kf_multivar(self, u):
-        return self.bounded((1 / (2 * np.prod(self.h))**len(u)) *
-                            np.cos(np.pi * np.prod(u) / np.prod(self.h)), np.prod(u))
+        return self.bounded(
+            (1 / (2 * np.prod(self.h)) ** len(u))
+            * np.cos(np.pi * np.prod(u) / np.prod(self.h)),
+            np.prod(u),
+        )
 
 
 class Linear(Kernel):
-    """ Linear  kernel function """
+    """Linear  kernel function"""
 
-    def __init__(self, data: np.ndarray = None, vlim=None, res: int = 101,
-                 weights: Any = None, bw_method=TUNING_METHOD.MLCV.name,
-                 point: np.ndarray = None, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -757,8 +817,12 @@ class Linear(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        h = self.h[0] if (isinstance(self.h, list)
-                          or isinstance(self.h, np.ndarray)) and len(self.h) == 1 else self.h
+        h = (
+            self.h[0]
+            if (isinstance(self.h, list) or isinstance(self.h, np.ndarray))
+            and len(self.h) == 1
+            else self.h
+        )
         return max(0, 1 - abs(u) / h)
 
     def kf_multivar(self, u):
@@ -766,18 +830,24 @@ class Linear(Kernel):
 
 
 class UniformRectangular(Kernel):
-    """ Uniform rectangular kernel function """
+    """Uniform rectangular kernel function"""
 
-    def __init__(self, data: np.ndarray = None,
-                 vlim=None, res: int = 101, weights: Any = None,
-                 bw_method=TUNING_METHOD.MLCV.name, point: np.ndarray = None,
-                 h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -788,22 +858,28 @@ class UniformRectangular(Kernel):
         return self.bounded(0.5, u)
 
     def kf_multivar(self, u):
-        return self.bounded(0.5/np.prod(self.h), np.prod(u))
+        return self.bounded(0.5 / np.prod(self.h), np.prod(u))
 
 
 class Triweight(Kernel):
-    """ Triweight kernel function """
+    """Triweight kernel function"""
 
-    def __init__(self, data: np.ndarray = None, vlim=None,
-                 res: int = 101, weights: Any = None,
-                 bw_method=TUNING_METHOD.MLCV.name,
-                 point: np.ndarray = None, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -811,25 +887,33 @@ class Triweight(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        return self.bounded((35/32)*(1-u**2)**3, u)
+        return self.bounded((35 / 32) * (1 - u**2) ** 3, u)
 
     def kf_multivar(self, u):
-        return self.bounded(np.prod((35/32)*(1-u**2)**3)/np.prod(self.h), np.prod(u))
+        return self.bounded(
+            np.prod((35 / 32) * (1 - u**2) ** 3) / np.prod(self.h), np.prod(u)
+        )
 
 
 class Tricube(Kernel):
-    """ tricube kernel function """
+    """tricube kernel function"""
 
-    def __init__(self, data: np.ndarray = None, vlim=None,
-                 res: int = 101, weights: Any = None,
-                 bw_method=TUNING_METHOD.MLCV.name,
-                 point: np.ndarray = None, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -837,25 +921,33 @@ class Tricube(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        return self.bounded((70/81)*(1-np.abs(u)**3)**3, u)
+        return self.bounded((70 / 81) * (1 - np.abs(u) ** 3) ** 3, u)
 
     def kf_multivar(self, u):
-        return self.bounded(np.prod((70/81)*(1-np.abs(u)**3)**3)/np.prod(self.h), np.prod(u))
+        return self.bounded(
+            np.prod((70 / 81) * (1 - np.abs(u) ** 3) ** 3) / np.prod(self.h), np.prod(u)
+        )
 
 
 class Silverman(Kernel):
-    """ Silverman kernel function """
+    """Silverman kernel function"""
 
-    def __init__(self, data: np.ndarray = None, vlim=None,
-                 res: int = 101, weights: Any = None,
-                 bw_method=TUNING_METHOD.MLCV.name,
-                 point: np.ndarray = None, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -863,28 +955,45 @@ class Silverman(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        return 0.5*np.exp(-(abs(u))/np.sqrt(2)) * np.sin((abs(u)/np.sqrt(2))+(np.pi/4))
+        return (
+            0.5
+            * np.exp(-(abs(u)) / np.sqrt(2))
+            * np.sin((abs(u) / np.sqrt(2)) + (np.pi / 4))
+        )
 
     def kf_multivar(self, u):
         h = np.array(self.h)
         u = np.array(u)
-        return self.bounded(np.prod(0.5*np.exp(-(abs(u))/np.sqrt(2))
-                                    * np.sin((abs(u)/np.sqrt(2))+(np.pi/4)))/np.prod(h), np.prod(u))
+        return self.bounded(
+            np.prod(
+                0.5
+                * np.exp(-(abs(u)) / np.sqrt(2))
+                * np.sin((abs(u) / np.sqrt(2)) + (np.pi / 4))
+            )
+            / np.prod(h),
+            np.prod(u),
+        )
 
 
 class Sigmoid(Kernel):
-    """ Sigmoid kernel function """
+    """Sigmoid kernel function"""
 
-    def __init__(self, data: np.ndarray = None, vlim=None,
-                 res: int = 101, weights: Any = None,
-                 bw_method=TUNING_METHOD.MLCV.name,
-                 point: np.ndarray = None, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -892,26 +1001,34 @@ class Sigmoid(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        return (2/np.pi) * (1/(np.exp(u)+np.exp(-u)))
+        return (2 / np.pi) * (1 / (np.exp(u) + np.exp(-u)))
 
     def kf_multivar(self, u):
-        return self.bounded(np.prod((2/np.pi)
-                                    * (1/(np.exp(u)+np.exp(-u))))/np.prod(self.h), np.prod(u))
+        return self.bounded(
+            np.prod((2 / np.pi) * (1 / (np.exp(u) + np.exp(-u)))) / np.prod(self.h),
+            np.prod(u),
+        )
 
 
 class Biweight(Kernel):
-    """ biweight kernel function """
+    """biweight kernel function"""
 
-    def __init__(self, data: np.ndarray = None, vlim=None,
-                 res: int = 101, weights: Any = None,
-                 bw_method=TUNING_METHOD.MLCV.name, point: np.ndarray = None,
-                 h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -919,24 +1036,33 @@ class Biweight(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        return self.bounded((15/16) * (1-u**2)**2, u)
+        return self.bounded((15 / 16) * (1 - u**2) ** 2, u)
 
     def kf_multivar(self, u):
-        return self.bounded(np.prod((15/16) * (1-u**2)**2)/np.prod(self.h), np.prod(u))
+        return self.bounded(
+            np.prod((15 / 16) * (1 - u**2) ** 2) / np.prod(self.h), np.prod(u)
+        )
 
 
 class Logistic(Kernel):
-    """ logistic kernel function """
+    """logistic kernel function"""
 
-    def __init__(self, data: np.ndarray = None, vlim=None, res: int = 101,
-                 weights: Any = None, bw_method=TUNING_METHOD.MLCV.name,
-                 point: np.ndarray = None, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.MLCV.name,
+        point: np.ndarray = None,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
@@ -944,10 +1070,10 @@ class Logistic(Kernel):
         self.h = h
 
     def kf_univar(self, u):
-        return 1/((np.exp(u)+2+np.exp(-u)))
+        return 1 / (np.exp(u) + 2 + np.exp(-u))
 
     def kf_multivar(self, u):
-        return np.prod(1/((np.exp(u)+2+np.exp(-u))))/np.prod(self.h)
+        return np.prod(1 / (np.exp(u) + 2 + np.exp(-u))) / np.prod(self.h)
 
 
 class GaussianRBF(Kernel):
@@ -957,16 +1083,23 @@ class GaussianRBF(Kernel):
     :type Kernel: _type_
     """
 
-    def __init__(self, data: np.ndarray = None, vlim=None,
-                 res: int = 101, weights: Any = None,
-                 bw_method=TUNING_METHOD.SCOTT.name,
-                 point: np.ndarray = None, n_r: int = 0, h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.SCOTT.name,
+        point: np.ndarray = None,
+        n_r: int = 0,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         if n_r > 0:
             self._ne = n_r
         else:
@@ -983,7 +1116,7 @@ class GaussianRBF(Kernel):
 
     def kf_multivar(self, u):
         h = np.array(self.h)
-        return np.exp(-np.linalg.norm(u)**2 / (2 * min(h)**2))
+        return np.exp(-(np.linalg.norm(u) ** 2) / (2 * min(h) ** 2))
 
 
 class MultiquadricRBF(Kernel):
@@ -993,16 +1126,23 @@ class MultiquadricRBF(Kernel):
     :type Kernel: _type_
     """
 
-    def __init__(self, data: np.ndarray = None, vlim=None, res: int = 101,
-                 weights: Any = None, bw_method=TUNING_METHOD.SCOTT.name,
-                 point: np.ndarray = None, n_r: int = 0,
-                 h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.SCOTT.name,
+        point: np.ndarray = None,
+        n_r: int = 0,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         if n_r > 0:
             self._ne = n_r
         else:
@@ -1018,7 +1158,7 @@ class MultiquadricRBF(Kernel):
         return self.kf_multivar(u)
 
     def kf_multivar(self, u):
-        return np.exp(-np.linalg.norm(u)**2 / (2 * min(self.h)**2))
+        return np.exp(-(np.linalg.norm(u) ** 2) / (2 * min(self.h) ** 2))
 
 
 class InverseMultiquadricRBF(Kernel):
@@ -1028,16 +1168,23 @@ class InverseMultiquadricRBF(Kernel):
     :type Kernel: _type_
     """
 
-    def __init__(self, data: np.ndarray = None, vlim=None, res: int = 101,
-                 weights: Any = None, bw_method=TUNING_METHOD.SCOTT.name,
-                 point: np.ndarray = None, n_r: int = 0,
-                 h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.SCOTT.name,
+        point: np.ndarray = None,
+        n_r: int = 0,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         if n_r > 0:
             self._ne = n_r
         else:
@@ -1053,7 +1200,7 @@ class InverseMultiquadricRBF(Kernel):
         return self.kf_multivar(u)
 
     def kf_multivar(self, u):
-        return 1 / np.sqrt(np.linalg.norm(u)**2 + min(self.h)**2)
+        return 1 / np.sqrt(np.linalg.norm(u) ** 2 + min(self.h) ** 2)
 
 
 class ThinPlateSplineRBF(Kernel):
@@ -1063,16 +1210,23 @@ class ThinPlateSplineRBF(Kernel):
     :type Kernel: _type_
     """
 
-    def __init__(self, data: np.ndarray = None, vlim=None, res: int = 101,
-                 weights: Any = None, bw_method=TUNING_METHOD.SCOTT.name,
-                 point: np.ndarray = None, n_r: int = 0,
-                 h: List[float] = None):
+    def __init__(
+        self,
+        data: np.ndarray = None,
+        vlim=None,
+        res: int = 101,
+        weights: Any = None,
+        bw_method=TUNING_METHOD.SCOTT.name,
+        point: np.ndarray = None,
+        n_r: int = 0,
+        h: List[float] = None,
+    ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
         if self.weights is not None:
-            self._ne = 1/sum(self.weights**2)
+            self._ne = 1 / sum(self.weights**2)
         if n_r > 0:
             self._ne = n_r
         else:

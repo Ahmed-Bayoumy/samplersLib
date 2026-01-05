@@ -25,13 +25,13 @@
 """
 
 import heapq
-from typing import Callable
-from scipy.stats import kendalltau, norm
-from scipy.spatial.distance import cdist
 from abc import ABC, abstractmethod
+from typing import Callable
 
 import numpy as np
+
 # ====================== PREDICTOR CLASSES ======================
+
 
 class Predictor(ABC):
     """_summary_
@@ -41,6 +41,7 @@ class Predictor(ABC):
     :return: _description_
     :rtype: _type_
     """
+
     @abstractmethod
     def fit(self, X, y):
         """_summary_
@@ -76,8 +77,8 @@ class Predictor(ABC):
 
 
 class KernelWeightedAverage(Predictor):
-    """_summary_
-    """
+    """_summary_"""
+
     def __init__(self, bandwidth=0.1, kw_calculator: Callable = None):
         self.mixed_kernel: Callable = kw_calculator
         self.bandwidth = bandwidth
@@ -93,13 +94,13 @@ class KernelWeightedAverage(Predictor):
     def uncertainty(self, x):
         weights = np.array([self.mixed_kernel(x, xi) for xi in self.X])
         mean = self.predict(x)
-        var = np.dot(weights, (self.y - mean)**2) / (np.sum(weights) + 1e-8)
+        var = np.dot(weights, (self.y - mean) ** 2) / (np.sum(weights) + 1e-8)
         return np.sqrt(var)
 
 
 class KernelRidgeRegression(Predictor):
-    """_summary_
-    """
+    """_summary_"""
+
     def __init__(self, alpha=1.0, bandwidth=0.1, kw_calculator: Callable = None):
         self.alpha = alpha
         self.bandwidth = bandwidth
@@ -120,8 +121,8 @@ class KernelRidgeRegression(Predictor):
 
 
 class LocalPolynomialRegression(Predictor):
-    """_summary_
-    """
+    """_summary_"""
+
     def __init__(self, bandwidth=0.2, kw_calculator: Callable = None):
         self.bandwidth = bandwidth
         self.mixed_kernel: Callable = kw_calculator
@@ -142,8 +143,8 @@ class LocalPolynomialRegression(Predictor):
 
 
 class GPWithMixedKernel(Predictor):
-    """_summary_
-    """
+    """_summary_"""
+
     def __init__(self, noise=1e-5, bandwidth=0.1, kw_calculator: Callable = None):
         self.mixed_kernel: Callable = kw_calculator
         self.noise = noise
@@ -167,8 +168,8 @@ class GPWithMixedKernel(Predictor):
 
 
 class MDNInspired(Predictor):
-    """_summary_
-    """
+    """_summary_"""
+
     def __init__(self, bandwidth=0.2, kw_calculator: Callable = None):
         self.mixed_kernel: Callable = kw_calculator
         self.bandwidth = bandwidth
@@ -184,14 +185,14 @@ class MDNInspired(Predictor):
 
     def uncertainty(self, x):
         weights = np.array([self.mixed_kernel(x, xi) for xi in self.X])
-        weights /= (np.sum(weights) + 1e-8)
+        weights /= np.sum(weights) + 1e-8
         mean = self.predict(x)
-        return np.sqrt(np.sum(weights * (self.y - mean)**2))
+        return np.sqrt(np.sum(weights * (self.y - mean) ** 2))
 
 
 class KDNode(Predictor):
-    """_summary_
-    """
+    """_summary_"""
+
     def __init__(self, point, label, axis, index=None, left=None, right=None):
         self.point = point
         self.label = label
@@ -216,6 +217,7 @@ class KDTree(Predictor):
     :param Predictor: _description_
     :type Predictor: _type_
     """
+
     def __init__(self, X, y):
         self.root = self.build_tree(X, y)
 
@@ -260,7 +262,7 @@ class KDTree(Predictor):
             axis=axis,
             index=median_idx,
             left=self.build_tree(X, y, sorted_indices[:median], depth + 1),
-            right=self.build_tree(X, y, sorted_indices[median + 1:], depth + 1)
+            right=self.build_tree(X, y, sorted_indices[median + 1 :], depth + 1),
         )
 
     def _knn(self, node, target, k, heap):
@@ -307,7 +309,7 @@ class KDTree(Predictor):
         self._knn(self.root, np.array(x), k, heap)
 
         # Return (distance, index, label)
-        return sorted([(-d, idx, l) for d, idx, l in heap], key=lambda t: t[0])
+        return sorted([(-d, idx, h) for d, idx, h in heap], key=lambda t: t[0])
 
 
 class KNNKernelWeighted(Predictor):
@@ -316,7 +318,8 @@ class KNNKernelWeighted(Predictor):
     :param Predictor: _description_
     :type Predictor: _type_
     """
-    def __init__(self, k=10, bandwidth=0., kw_calculator: Callable = None):
+
+    def __init__(self, k=10, bandwidth=0.0, kw_calculator: Callable = None):
         self.mixed_kernel: Callable = kw_calculator
         self.k = k
         self.bandwidth = bandwidth
@@ -330,10 +333,9 @@ class KNNKernelWeighted(Predictor):
         results = self.kdtree.query(x, self.k)
 
         distances = np.array([d for d, _, _ in results])
-        indices = np.array([
-            np.where((self.X == p).all(axis=1))[0][0]
-            for _, p, _ in results
-        ])
+        indices = np.array(
+            [np.where((self.X == p).all(axis=1))[0][0] for _, p, _ in results]
+        )
 
         return distances, indices
 
@@ -344,7 +346,7 @@ class KNNKernelWeighted(Predictor):
         values = self.y[indices]
 
         weights = np.array([self.mixed_kernel(x, xi) for xi in neighbors])
-        weights /= (np.sum(weights) + 1e-8)
+        weights /= np.sum(weights) + 1e-8
 
         return np.dot(weights, values)
 
@@ -357,9 +359,10 @@ class KNNKernelWeighted(Predictor):
         mean = self.predict(x)
 
         weights = np.array([self.mixed_kernel(x, xi) for xi in neighbors])
-        weights /= (np.sum(weights) + 1e-8)
+        weights /= np.sum(weights) + 1e-8
 
         return np.sqrt(np.sum(weights * (values - mean) ** 2))
+
 
 # --- Adaptive Ensemble Model ---
 
@@ -370,6 +373,7 @@ class AdaptiveEnsemble(Predictor):
     :param Predictor: _description_
     :type Predictor: _type_
     """
+
     def __init__(self, models, bandwidth=0.1):
         self.models = models
         self.n_models = len(models)
@@ -393,11 +397,10 @@ class AdaptiveEnsemble(Predictor):
         preds = np.array([m.predict(x) for m in self.models])
         uncerts = np.array([m.uncertainty(x) for m in self.models])
         mean_pred = np.dot(self.weights, preds)
-        variance = np.dot(self.weights, (preds - mean_pred)**2)
+        variance = np.dot(self.weights, (preds - mean_pred) ** 2)
         weighted_uncert = np.dot(self.weights, uncerts)
         # Combine uncertainty + variance of predictions
         return np.sqrt(weighted_uncert**2 + variance)
-
 
     def predict_with_zscore(self, xps, y_obs=None):
         """_summary_
@@ -422,7 +425,7 @@ class AdaptiveEnsemble(Predictor):
 
             # 3. Calculate combined uncertainty (the sigma for z-score)
             # Variance of predictions (Epistemic) + Mean of individual uncertainties (Aleatoric)
-            variance_of_preds = np.dot(self.weights, (preds - mean_pred[i])**2)
+            variance_of_preds = np.dot(self.weights, (preds - mean_pred[i]) ** 2)
             weighted_uncert_sq = np.dot(self.weights, uncerts**2)
 
             total_uncertainty.append(np.sqrt(weighted_uncert_sq + variance_of_preds))
@@ -447,7 +450,7 @@ class AdaptiveEnsemble(Predictor):
         mean_MSE = 0.0
         for i, x in enumerate(xps):
             preds = np.array([m.predict(x) for m in self.models])
-            mean_MSE += (yps[i] - np.dot(self.weights, preds))**2
+            mean_MSE += (yps[i] - np.dot(self.weights, preds)) ** 2
         mean_MSE /= i
         return mean_MSE
 
@@ -460,8 +463,9 @@ class AdaptiveEnsemble(Predictor):
         :type y_val: _type_
         """
         # Evaluate all models on validation points X_val with true y_val
-        preds = np.array([[m.predict(x) for x in X_val] \
-                          for m in self.models])  # shape: (n_models, n_points)
+        preds = np.array(
+            [[m.predict(x) for x in X_val] for m in self.models]
+        )  # shape: (n_models, n_points)
         errors = np.abs(preds - y_val)
         mean_errors = errors.mean(axis=1) + 1e-8  # avoid div by zero
 
