@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from pyDOE2 import lhs
+from pyDOE3 import lhs
 from scipy.spatial.distance import cdist, pdist
 from scipy.stats import norm
 
