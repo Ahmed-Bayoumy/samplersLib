@@ -17,26 +17,37 @@ jobs:
 
     runs-on: windows-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        # Define the versions you want to test
+        python-version: ["3.10", "3.11", "3.12"]
+
     steps:
     - uses: actions/checkout@v5
-    - name: Set up Python 3.10, 3.11, 3.12
-      uses: actions/setup-python@v3
+
+    - name: Install uv and set Python version
+      uses: [astral-sh/setup-uv](https://github.com/astral-sh/setup-uv)@v5
       with:
-        python-version: ["3.10", "3.11", "3.12"]
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
+        # Automatically uses the version from the matrix
+        python-version: ${{ matrix.python-version }}
         enable-cache: true
-        python-version: ["3.10", "3.11", "3.12"]
-    - name: suncing
-      run: uv sync --all-extras --all-groups
+
+    - name: Install dependencies
+      # uv sync will respect the python-version set by setup-uv
+      run: uv sync --frozen
+
     - name: ruff lint
       run: uvx ruff check .
+
     - name: Build package
       run: uv build
+
     - name: Install built wheel
       run: |
-        pip install --find-links dist samplersLib
-        pip install plotly matplotlib flake8 pytest pytest-cov
-    - name: Run pytest
-      run: pytest
+        uv pip install --find-links dist samplersLib
+        uv pip install plotly matplotlib flake8 pytest pytest-cov
+
+    - name: Run tests
+      # Use 'uv run' to ensure the correct virtualenv is used
+      run: uv run pytest
