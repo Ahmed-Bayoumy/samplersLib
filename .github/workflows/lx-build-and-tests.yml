@@ -14,12 +14,11 @@ permissions:
 
 jobs:
   lx-build-and-tests:
-
+    name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Define the versions you want to test
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:

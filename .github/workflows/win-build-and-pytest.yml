@@ -14,18 +14,15 @@ permissions:
 
 jobs:
   win-build-and-tests:
-
+    name: Python ${{ matrix.python-version }}
     runs-on: windows-latest
-
     strategy:
       fail-fast: false
       matrix:
-        # Define the versions you want to test
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v5
-
       - name: Install uv and set Python version
         uses: [astral-sh/setup-uv](https://github.com/astral-sh/setup-uv)@v5
         with:
