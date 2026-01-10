@@ -23,30 +23,30 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-    - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
-    - name: Install uv and set Python version
-      uses: [astral-sh/setup-uv](https://github.com/astral-sh/setup-uv)@v5
-      with:
-        # Automatically uses the version from the matrix
-        python-version: ${{ matrix.python-version }}
-        enable-cache: true
+      - name: Install uv and set Python version
+        uses: [astral-sh/setup-uv](https://github.com/astral-sh/setup-uv)@v5
+        with:
+          # Automatically uses the version from the matrix
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
 
-    - name: Install dependencies
-      # uv sync will respect the python-version set by setup-uv
-      run: uv sync --frozen
+      - name: Install dependencies
+        # uv sync will respect the python-version set by setup-uv
+        run: uv sync --frozen
 
-    - name: ruff lint
-      run: uvx ruff check .
+      - name: ruff lint
+        run: uvx ruff check .
 
-    - name: Build package
-      run: uv build
+      - name: Build package
+        run: uv build
 
-    - name: Install built wheel
-      run: |
-        uv pip install --find-links dist samplersLib
-        uv pip install plotly matplotlib flake8 pytest pytest-cov
+      - name: Install built wheel
+        run: |
+          uv pip install --find-links dist samplersLib
+          uv pip install plotly matplotlib flake8 pytest pytest-cov
 
-    - name: Run tests
-      # Use 'uv run' to ensure the correct virtualenv is used
-      run: uv run pytest
+      - name: Run tests
+        # Use 'uv run' to ensure the correct virtualenv is used
+        run: uv run pytest
