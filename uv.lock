@@ -1034,21 +1034,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pydoe3"
-version = "1.6.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/84/334c4311576a45c5d81e925ad222f2222eca163f926d6e4c9ef6bdc5edfa/pydoe3-1.6.1.tar.gz", hash = "sha256:33923da2aa04ce0381a8fe9db678cba0c4b9906290a0c38dbf9cf316845ec98e", size = 156404, upload-time = "2025-11-27T16:50:22.345Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/bf/d8/56a9181765113853a582b0519093eaa36d89d972cfb6d804026457807b16/pydoe3-1.6.1-py2.py3-none-any.whl", hash = "sha256:f49a274d6eb8f0a4bc624ab66b48a77c3a301ea480ad501cd3b85afc47f1adc9", size = 66645, upload-time = "2025-11-27T16:50:20.899Z" },
-]
-
-[[package]]
 name = "pyflakes"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1145,13 +1130,12 @@ wheels = [
 
 [[package]]
 name = "samplerslib"
-version = "2601.1"
+version = "2601.2"
 source = { virtual = "." }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas" },
-    { name = "pydoe3" },
     { name = "requests" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1181,7 +1165,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", marker = "extra == 'visualization'", specifier = ">=6.5.0" },
-    { name = "pydoe3", specifier = ">=1.6.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "requests", specifier = ">=2.32.5" },
