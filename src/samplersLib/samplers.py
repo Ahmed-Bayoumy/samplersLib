@@ -35,7 +35,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from pyDOE3 import lhs
 from scipy.spatial.distance import cdist, pdist
 from scipy.stats import norm
 
@@ -322,6 +321,131 @@ class LHS(Sampling):
         self.n_s = ns
         self.var_limits = copy.deepcopy(vlim)
 
+    def lhs(self, n, samples=None, criterion=None, iterations=5, random_state=None):
+        """
+        Generate a Latin Hypercube Sample.
+
+        Parameters
+        ----------
+        n : int
+            Number of dimensions.
+        samples : int, optional
+            Number of samples (defaults to n).
+        criterion : str, optional
+            {'center', 'maximin', 'centermaximin', 'correlation'}
+        iterations : int, optional
+            Number of optimization iterations.
+        random_state : int or Generator, optional
+            Overrides the class RNG.
+
+        Returns
+        -------
+        H : numpy.ndarray
+            LHS design of shape (samples, n) in [0, 1].
+        """
+
+        if random_state is not None:
+            if isinstance(random_state, np.random.Generator):
+                rng = random_state
+            else:
+                rng = np.random.default_rng(random_state)
+        else:
+            rng = self.rng
+
+        if samples is None:
+            samples = n
+
+        if criterion is not None:
+            criterion = criterion.lower()
+
+        if criterion is None:
+            return self._lhs_basic(n, samples, rng, centered=False)
+
+        if criterion == "center":
+            return self._lhs_basic(n, samples, rng, centered=True)
+
+        if criterion in ("maximin", "centermaximin"):
+            centered = criterion == "centermaximin"
+            return self._lhs_maximin(n, samples, iterations, rng, centered)
+
+        if criterion == "correlation":
+            return self._lhs_correlation(n, samples, iterations, rng)
+
+        raise ValueError(f"Unknown criterion '{criterion}'")
+
+    # ------------------------------------------------------------------
+    # Core LHS construction
+    # ------------------------------------------------------------------
+    def _lhs_basic(self, n, samples, rng, centered=False):
+        H = np.zeros((samples, n), dtype=float)
+
+        for j in range(n):
+            if centered:
+                cut = (np.arange(samples) + 0.5) / samples
+            else:
+                cut = (np.arange(samples) + rng.random(samples)) / samples
+
+            rng.shuffle(cut)
+            H[:, j] = cut
+
+        return H
+
+    # ------------------------------------------------------------------
+    # Maximin criterion
+    # ------------------------------------------------------------------
+    def _lhs_maximin(self, n, samples, iterations, rng, centered):
+        best_H = None
+        best_d = -np.inf
+
+        for _ in range(iterations):
+            H = self._lhs_basic(n, samples, rng, centered)
+            d = self._min_pairwise_distance(H)
+
+            if d > best_d:
+                best_d = d
+                best_H = H
+
+        return best_H
+
+    def _min_pairwise_distance(self, H):
+        """
+        Minimum Euclidean distance between distinct rows of H.
+        """
+        dmin = np.inf
+        m = H.shape[0]
+
+        for i in range(m - 1):
+            diff = H[i + 1 :] - H[i]
+            dist = np.sqrt(np.sum(diff * diff, axis=1))
+            dmin = min(dmin, np.min(dist))
+
+        return dmin
+
+    # ------------------------------------------------------------------
+    # Correlation criterion
+    # ------------------------------------------------------------------
+    def _lhs_correlation(self, n, samples, iterations, rng):
+        best_H = None
+        best_score = np.inf
+
+        for _ in range(iterations):
+            H = self._lhs_basic(n, samples, rng, centered=False)
+            score = self._correlation_score(H)
+
+            if score < best_score:
+                best_score = score
+                best_H = H
+
+        return best_H
+
+    def _correlation_score(self, H):
+        """
+        Sum of squared off-diagonal Pearson correlations.
+        """
+        C = np.corrcoef(H, rowvar=False)
+        off_diag = C - np.eye(C.shape[0])
+        return np.sum(off_diag**2)
+
     def utilities(self):
         pass
 
@@ -355,7 +479,7 @@ class LHS(Sampling):
     def methods(self, nx: int = None, ns: int = None, criterion: str = None, r: Any = None):
         if criterion is not None:
             if self.options["criterion"]:
-                return lhs(
+                return self.lhs(
                     nx,
                     samples=ns,
                     criterion=self.options["criterion"],
@@ -363,7 +487,7 @@ class LHS(Sampling):
                     random_state=r,
                 )
             else:
-                return lhs(nx, samples=ns, criterion=self.options["criterion"], random_state=r)
+                return self.lhs(nx, samples=ns, criterion=self.options["criterion"], random_state=r)
         else:
             return self._exactse(nx, ns)
 
@@ -485,7 +609,7 @@ class LHS(Sampling):
     def _exactse(self, dim, nt, fixed_index=[], p0=[]):
         # Parameters of Optimize Exact Solution Evaluation procedure
         if len(fixed_index) == 0:
-            p0 = lhs(dim, nt, criterion=None, random_state=self.random_state)
+            p0 = self.lhs(dim, nt, criterion=None, random_state=self.random_state)
         else:
             p0 = p0
             self.random_state = np.random.RandomState()  # pylint: disable=no-member
