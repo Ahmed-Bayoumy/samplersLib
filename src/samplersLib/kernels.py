@@ -36,27 +36,46 @@ from ._common import KERNEL_TYPE, TUNING_METHOD
 
 
 class Kernel(ABC):
-    """Base class for kernel functions"""
+    """ Base class for kernel functions
+
+    :param ABC: Abstract Class
+    :param _ns: Number of given sample datapoints
+    :param _nd: Number of dimensions
+    :param data: Given datapoints array
+    :param h: Bandwidth list (per parameter, initially can provide a list of size one where all parameters will initially be assigned to that single value provided)
+    :param std_dev: A list of standard deviations
+    :param weights: List of weights where each weight corresponds to the importance weight of the input datapoint in the 
+    :param _ne: Number of datapoints to be resampled following the inferred distribution function
+    :param _covariance_factor: A scalar that scales the data's own covariance matrix, effectively creating a bandwidth matrix (H) that adapts smoothing to the data's spread and orientation, ensuring the kernel covariance is proportional to the data's inherent variability, not just a single 'h'. 
+    :param: The inverse of the data covariance matrix
+    :param _points: Points array constructed over a grid
+    :param est_pdf: Estimated probability distribution of the datapoints
+    :param vlim: Parameters limits of input datapoints (upper and lower bounds)
+    :param bw_method: Bandwidth calculation method
+    :param is_debugging: A flag that helps visualizing inferrence qualitative measures like covariance
+    :param _type: The kernel type (parametric, or non-parametric)
+    :param _calculate_bw: A boolean that indicates whether to calculate the list of bandwidths or use the one provided assigned to h
+
+
+    :param 
+    :type ABC: _type_
+    :return: A kernel base class template
+    :rtype: _type_
+    """
 
     _ns: int = 0
     _nd: int = 0
     data: np.ndarray = None
-    x: np.ndarray = None
-    h: List[float] = 0.1
-    K: np.ndarray = None
-    std_dev: float = None
+    h: List[float] = [0.1]
+    std_dev: List[float] = None
     weights: Any = None
     _ne: int = 0
     _covariance_factor: Callable = None
-    _factor: Any = None
     _data_inv_cov: np.ndarray = None
     _data_cov: np.ndarray = None
     _cov: np.ndarray = None
     _inv_cov: np.ndarray = None
-    _log_det: Any = None
-    res: int = 101
     _points: np.ndarray = None
-    _point: np.ndarray = None
     est_pdf: np.ndarray = None
     vlim: np.ndarray = None
     bw_method: str = None
@@ -67,42 +86,34 @@ class Kernel(ABC):
     def __init__(
         self,
         data: np.ndarray = None,
-        x: np.ndarray = None,
-        h: List[float] = 0.1,
-        std_dev: float = None,
-        weights: Any = None,
+        vlim=None,
         res: int = 101,
-        est_pdf: np.ndarray = None,
-        vlim: np.ndarray = None,
-        bw_method: str = None,
-        is_debugging: bool = False,
+        weights: Any = None,
+        bw_method: str = "SCOTT",
+        n_r: int = 0,
+        h: List[float] = None,
         calculate_bw=True,
     ):
-        """Protocol class for kernel functions"""
-        self._ns: int = 0
-        self._nd: int = 0
-        self.data: np.ndarray = data
-        self.x: np.ndarray = x
-        self.h: List[float] = h
-        self.std_dev: float = std_dev
-        self.weights: Any = weights
-        self._ne: int = 0
-        self._covariance_factor: Callable = None
-        self._factor: Any = None
-        self._data_inv_cov: np.ndarray = None
-        self._data_cov: np.ndarray = None
-        self._cov: np.ndarray = None
-        self._inv_cov: np.ndarray = None
-        self._log_det: Any = None
-        self.res: int = res
-        self._points: np.ndarray = None
-        self._point: np.ndarray = None
-        self.est_pdf: np.ndarray = est_pdf
-        self.vlim: np.ndarray = vlim
-        self.bw_method: str = bw_method
-        self.is_debugging: bool = is_debugging
-        self._type: KERNEL_TYPE = KERNEL_TYPE.NONPARAMETRIC
-        self._calculate_bw = True
+        self.data = copy.deepcopy(data)
+        self._ns = data.shape[0]
+        self._nd = data.shape[1]
+        self.weights = weights
+        self.h = h
+        self._calculate_bw = calculate_bw
+
+        # Effective sample size
+        if n_r > 0:
+            self._ne = n_r
+        # elif self.weights is not None:
+        #     self._ne = int(1 / np.sum(self.weights ** 2))
+        else:
+            self._ne = self._ns
+
+        self.vlim = np.atleast_2d(vlim)
+        self.bw_method = bw_method
+        self._type = KERNEL_TYPE.NONPARAMETRIC
+        if self._cov is None and self._calculate_bw:
+            self.set_bw(method=bw_method)
 
     @property
     def type(self):
@@ -328,7 +339,7 @@ class Kernel(ABC):
         """Computes the covariance matrix for each kernel using
         the kernel BW (covariance factor)."""
         try:
-            self._factor = self._covariance_factor()
+            factor = self._covariance_factor()
 
             if self._data_inv_cov is None:
                 if self.weights is None:
@@ -336,7 +347,7 @@ class Kernel(ABC):
                 self._data_cov = np.atleast_2d(np.cov(self.data.T, rowvar=1, bias=True, aweights=self.weights))
                 self._data_inv_cov = np.linalg.inv(self._data_cov)
 
-            self._cov = self._data_cov * self._factor**2
+            self._cov = self._data_cov * factor**2
             self.is_debugging = False
             if self.is_debugging:
                 labs = [f"x{i}" for i in range(self._nd)]
@@ -344,7 +355,7 @@ class Kernel(ABC):
                 fig = px.imshow(self._cov, text_auto=True, x=labs, y=labs)
                 fig.show()
                 # plt.show()
-            self._inv_cov = self._data_inv_cov / self._factor**2
+            self._inv_cov = self._data_inv_cov / factor**2
             # L = np.linalg.cholesky(self._cov*2*np.pi)
             # self._log_det = 2*np.log(np.diag(L)).sum()
         except Exception:
@@ -487,44 +498,29 @@ class Kernel(ABC):
 
 
 class Gaussian(Kernel):
-    """_summary_
+    """A Gaussian kernel
 
-    :param Kernel: _description_
-    :type Kernel: _type_
+    :param Kernel: Base kernel class
+    :type Kernel: Abstract class
     """
 
     def __init__(
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method: str = "SCOTT",
-        point: np.ndarray = None,
         n_r: int = 0,
         h: List[float] = None,
         calculate_bw=True,
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        self.h = h
-        self._calculate_bw = calculate_bw
-
-        # Effective sample size
-        if n_r > 0:
-            self._ne = n_r
-        # elif self.weights is not None:
-        #     self._ne = int(1 / np.sum(self.weights ** 2))
-        else:
-            self._ne = self._ns
-
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        if self._cov is None and self._calculate_bw:
-            self.set_bw(method=bw_method)
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         if self.h is None:
@@ -562,32 +558,19 @@ class Cauchy(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method: str = "SCOTT",
-        point: np.ndarray = None,
         n_r: int = 0,
         h: List[float] = None,
         calculate_bw: bool = True,
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        self.h = h
-        self._calculate_bw = calculate_bw
-        if self._cov is None and self._calculate_bw:
-            self.set_bw(method=bw_method)
-
-        if n_r > 0:
-            self._ne = n_r
-        # elif self.weights is not None:
-        #     self._ne = 1 / np.sum(self.weights ** 2)
-        else:
-            self._ne = self._ns
-
-        self.vlim = np.atleast_2d(vlim)
-        self._type = KERNEL_TYPE.NONPARAMETRIC
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         if self.h is None:
@@ -623,27 +606,19 @@ class Epanechnikov(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
         calculate_bw: bool = True,
+        n_r: int = 0
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
-        self._calculate_bw = calculate_bw
-        if self._cov is None and self._calculate_bw:
-            self.set_bw(method=bw_method)
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     """ Epanechnikov kernel function """
 
@@ -675,34 +650,20 @@ class Laplace(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method: str = "MLCV",
-        point: np.ndarray = None,
         h: List[float] = None,
         calculate_bw: bool = True,
+        n_r: int = 0
     ):
-        if data is not None:
-            self.data = np.atleast_2d(copy.deepcopy(data))
-            self._ns = self.data.shape[0]  # num samples
-            self._nd = self.data.shape[1]  # num dimensions
-        else:
-            raise ValueError("Data must be provided.")
-
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / np.sum(np.square(self.weights))
-        else:
-            self._ne = self._ns
-
-        self.vlim = np.atleast_2d(vlim) if vlim is not None else None
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = np.array(h) if h is not None else np.ones(self._nd)  # fallback bandwidth
-        self._calculate_bw = calculate_bw
-        if self._cov is None and self._calculate_bw:
-            self.set_bw(method=bw_method)
-
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
+        
     def kf_univar(self, u: np.ndarray) -> np.ndarray:
         """Univariate Laplace kernel function."""
         h = self.h[0] if isinstance(self.h, (list, np.ndarray)) else self.h
@@ -722,23 +683,19 @@ class Cosine(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         h = self.h[0] if (isinstance(self.h, list) or isinstance(self.h, np.ndarray)) and len(self.h) == 1 else self.h
@@ -758,23 +715,19 @@ class Linear(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         h = self.h[0] if (isinstance(self.h, list) or isinstance(self.h, np.ndarray)) and len(self.h) == 1 else self.h
@@ -791,23 +744,19 @@ class UniformRectangular(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return self.bounded(0.5, u)
@@ -823,19 +772,22 @@ class Triweight(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0
     ):
         self.data = copy.deepcopy(data)
         self._ns = data.shape[0]
         self._nd = data.shape[1]
         self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
+        # Effective sample size
+        if n_r > 0:
+            self._ne = n_r
+        # elif self.weights is not None:
+        #     self._ne = int(1 / np.sum(self.weights ** 2))
+        else:
+            self._ne = self._ns
         self.vlim = np.atleast_2d(vlim)
         self.bw_method = bw_method
         self._type = KERNEL_TYPE.NONPARAMETRIC
@@ -855,23 +807,19 @@ class Tricube(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return self.bounded((70 / 81) * (1 - np.abs(u) ** 3) ** 3, u)
@@ -887,23 +835,19 @@ class Silverman(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return 0.5 * np.exp(-(abs(u)) / np.sqrt(2)) * np.sin((abs(u) / np.sqrt(2)) + (np.pi / 4))
@@ -924,23 +868,19 @@ class Sigmoid(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return (2 / np.pi) * (1 / (np.exp(u) + np.exp(-u)))
@@ -959,23 +899,19 @@ class Biweight(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return self.bounded((15 / 16) * (1 - u**2) ** 2, u)
@@ -991,23 +927,19 @@ class Logistic(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.MLCV.name,
-        point: np.ndarray = None,
         h: List[float] = None,
+        n_r: int = 0,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        self._ne = self._ns
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.NONPARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return 1 / (np.exp(u) + 2 + np.exp(-u))
@@ -1027,29 +959,19 @@ class GaussianRBF(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.SCOTT.name,
-        point: np.ndarray = None,
         n_r: int = 0,
         h: List[float] = None,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        if n_r > 0:
-            self._ne = n_r
-        else:
-            self._ne = self._ns
-        if bw_method != TUNING_METHOD.MLCV.name:
-            self.set_bw(bw_method)
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.PARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return self.kf_multivar(u)
@@ -1070,29 +992,19 @@ class MultiquadricRBF(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.SCOTT.name,
-        point: np.ndarray = None,
         n_r: int = 0,
         h: List[float] = None,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        if n_r > 0:
-            self._ne = n_r
-        else:
-            self._ne = self._ns
-        if bw_method != TUNING_METHOD.MLCV.name:
-            self.set_bw(bw_method)
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.PARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return self.kf_multivar(u)
@@ -1112,29 +1024,19 @@ class InverseMultiquadricRBF(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.SCOTT.name,
-        point: np.ndarray = None,
         n_r: int = 0,
         h: List[float] = None,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        if n_r > 0:
-            self._ne = n_r
-        else:
-            self._ne = self._ns
-        if bw_method != TUNING_METHOD.MLCV.name:
-            self.set_bw(bw_method)
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.PARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return self.kf_multivar(u)
@@ -1154,29 +1056,19 @@ class ThinPlateSplineRBF(Kernel):
         self,
         data: np.ndarray = None,
         vlim=None,
-        res: int = 101,
         weights: Any = None,
         bw_method=TUNING_METHOD.SCOTT.name,
-        point: np.ndarray = None,
         n_r: int = 0,
         h: List[float] = None,
+        calculate_bw: bool = True
     ):
-        self.data = copy.deepcopy(data)
-        self._ns = data.shape[0]
-        self._nd = data.shape[1]
-        self.weights = weights
-        if self.weights is not None:
-            self._ne = 1 / sum(self.weights**2)
-        if n_r > 0:
-            self._ne = n_r
-        else:
-            self._ne = self._ns
-        if bw_method != TUNING_METHOD.MLCV.name:
-            self.set_bw(bw_method)
-        self.vlim = np.atleast_2d(vlim)
-        self.bw_method = bw_method
-        self._type = KERNEL_TYPE.PARAMETRIC
-        self.h = h
+        super().__init__(data=data,
+                         vlim=vlim,
+                         weights=weights,
+                         bw_method=bw_method,
+                         n_r=n_r,
+                         h=h,
+                         calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
         return self.kf_multivar(u)

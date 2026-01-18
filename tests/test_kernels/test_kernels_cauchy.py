@@ -15,7 +15,7 @@ def sample_data():
 
 def test_instantiation_basic(sample_data):
     """Kernel should be instantiated without errors and set internal flags."""
-    k = Cauchy(data=sample_data, vlim=[[0, 1], [0, 1]], res=11, calculate_bw=False)
+    k = Cauchy(data=sample_data, vlim=[[0, 1], [0, 1]], calculate_bw=False)
 
     # basic attributes
     assert isinstance(k, Cauchy)
