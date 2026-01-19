@@ -113,7 +113,7 @@ def test_high_dimensional_path(high_dim_data, var_limits):
         vlim=var_limits,
         kernel_type=["Gaussian"],
         bw_method=TUNING_METHOD.SCOTT.name,
-        h=[0.1] * 2,
+        h=[0.1] * 3,
     )
     # The reducer is instantiated only for n_d > 3
     assert sampler.reducer is not None
@@ -132,7 +132,7 @@ def test_project_rd_to_original_space(high_dim_data, var_limits):
         vlim=var_limits,
         kernel_type=["Gaussian"],
         bw_method=TUNING_METHOD.SCOTT.name,
-        h=[0.1] * 2,
+        h=[0.1] * 3,
     )
     sampler.rd()
     # generate a few random points in reduced space
