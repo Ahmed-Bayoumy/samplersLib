@@ -27,12 +27,12 @@
 import copy
 import random
 from abc import ABC, abstractmethod
-from itertools import product
 from math import gamma
 from typing import Any, Callable, List
 
 import numpy as np
 import plotly.express as px
+from scipy.optimize import minimize
 
 from ._common import KERNEL_TYPE, TUNING_METHOD
 
@@ -169,37 +169,51 @@ class Kernel(ABC):
         self._points = np.vstack(np.meshgrid(*pt)).reshape(len(pt), -1).T
         self._points = self._points[: self._ne, :]
 
-    def tune_bandwidth_mlcv(self, grid_factor=2.0, n_grid=5):
+    def tune_bandwidth_mlcv(self, grid_factor=2.0, max_iter=50, random_restarts=3):
         """
-        Tune bandwidths using a simple grid search around the initial vector.
+        Tune bandwidths using a continuous optimisation approach
+        (leave‑one‑out log‑negative‑likelihood minimisation).
 
         Parameters
         ----------
         grid_factor : float, optional
-            Factor to expand/contract the grid range (default 2.0).
+            Factor to expand/contract the initial search range.
         n_grid : int, optional
-            Number of points per dimension in the grid (default 5).
+            Not used directly; kept for backward compatibility.
+        max_iter : int, optional
+            Maximum number of iterations per optimisation run.
+        random_restarts : int, optional
+            Number of random restarts to escape local minima.
 
         Returns
         -------
         ndarray
             Optimised bandwidth vector.
         """
-        h_init = self.h
+        h_init = self.h.copy()
         d = self._nd
-        # Build a multiplicative grid around each initial bandwidth
-        factors = np.linspace(1 / grid_factor, grid_factor, n_grid)
-        grids = [h_init[i] * factors for i in range(d)]
+
+        # Define bounds: [h_i / grid_factor , h_i * grid_factor]
+        bounds = [(h_init[i] / grid_factor, h_init[i] * grid_factor) for i in range(d)]
 
         best_h = None
         best_score = np.inf
 
-        for h_candidate in product(*grids):
-            h_vec = np.array(h_candidate)
-            score = self.loo_log_neg_likelihood(h_vec)
-            if score < best_score:
-                best_score = score
-                best_h = h_vec.copy()
+        # Helper objective (negative log‑likelihood)
+        def obj(h_vec):
+            return self.loo_log_neg_likelihood(np.asarray(h_vec))
+
+        # First run from the initial guess
+        res = minimize(obj, h_init, method="L-BFGS-B", bounds=bounds, options={"maxiter": max_iter})
+        if res.success and res.fun < best_score:
+            best_score, best_h = res.fun, res.x.copy()
+
+        # Random restarts to avoid local minima
+        for _ in range(random_restarts):
+            rand_start = np.array([np.random.uniform(low=b[0], high=b[1]) for b in bounds])
+            res = minimize(obj, rand_start, method="L-BFGS-B", bounds=bounds, options={"maxiter": max_iter})
+            if res.success and res.fun < best_score:
+                best_score, best_h = res.fun, res.x.copy()
 
         if best_h is not None:
             self.h = best_h

@@ -2149,15 +2149,14 @@ class TPE(Sampling):
         return self._suggest()
 
     @classmethod
-    def kde_resample(cls, ks: List[KERNEL], weights: List[float], data: List[List[float]]):
+    def kde_resample(cls, ks: List[KERNEL], weights: List[float], base_point: List[float], vlim: np.ndarray):
         """
         Resample using inferred distributions by introduced KDEs for a given dataset
         """
-        base_point = random.choice(data)
-        # Select kernel based on weighted probability
-        kernel = random.choices(ks, weights=weights)[0]
-        noise = kernel._sample_noise()
-        return [b + n for b, n in zip(base_point, noise)]
+
+        # Weighted Sum (Linear Combination)
+        noise = sum([np.multiply(weights[i], k._sample_noise()) for i, k in enumerate(ks)])
+        return [np.clip(b + n, vlim[:, 0], vlim[:, 1]) for b, n in zip(base_point, noise)]
 
     def generate_samples(self):
         pass
@@ -2263,17 +2262,26 @@ class BiTPE(TPE):
 
     def _suggest(self):
         # Calculate bandwidths per dimension
-        [k.tune_bw() for k in self.good_kernel]
-        [k.tune_bw() for k in self.bad_kernel]
+        for k in self.good_kernel:
+            try:
+                k.tune_bw()
+            except Exception as e:
+                self._msgs.append([2, f"Bandwidth tuning failed: {e}"])
+        for k in self.bad_kernel:
+            try:
+                k.tune_bw()
+            except Exception as e:
+                self._msgs.append([2, f"Bandwidth tuning failed: {e}"])
 
         # 2. Sample candidates and maximize l(x)/g(x)
         best_ratio = 1
         best_candidate = []
         sc = 0
         candidates = []
+
         for _ in range(self.n_r):
             # Sample from the 'good' GMM (pick a point and add Gaussian noise)
-            random.seed(self.seed + sc)
+            random.seed = sc + self.seed
             sc += 1
             # base_vec = self.good_obs[0]
             if len(candidates) >= self.n_r:
@@ -2283,10 +2291,13 @@ class BiTPE(TPE):
                 # sigma = (ub - lb) / np.sqrt(len(self.good_obs))
                 # val = random.normalvariate(base_vec[i],  sigma)
                 # val = max(lb, min(ub, val))  # Clip
+            ranks = np.arange(1, len(self.good_data) + 1)
+            probs = ranks / np.sum(ranks)
             candidates += self.kde_resample(
                 ks=self.good_kernel,
                 weights=[self.kernels[k] for k in self.kernels.keys()],
-                data=self.good_data,
+                base_point=random.choices(self.good_data, weights=probs)[0],
+                vlim=self.var_limits,
             )
 
             # Calculate densities
