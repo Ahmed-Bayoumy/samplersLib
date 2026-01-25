@@ -4,4 +4,7 @@
 [![macos-build-and-pytest](https://github.com/Ahmed-Bayoumy/samplersLib/actions/workflows/macos-build-and-pytest.yml/badge.svg)](https://github.com/Ahmed-Bayoumy/samplersLib/actions/workflows/macos-build-and-pytest.yml)
 
 # samplersLib
-A sampler library for online active sampling
+An open-source, data-driven framework for data generation that accelerates the optimization process by rapidly converging towards better incumbent solutions.
+
+# License & copyright
+© Ahmed H. Bayoumy 2026
