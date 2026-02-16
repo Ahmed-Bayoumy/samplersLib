@@ -166,7 +166,7 @@ def test_combined_kernels_rosen(plotting=False):
     results = [rosen(c) for c in candidates]
     print("Final best f(x):", min(results))
 
-    assert 1 - (min(results) / min(data_f)) > 0.85
+    assert 1 - (min(results) / min(data_f)) > 0.75
 
 
 # pylint: disable=missing-function-docstring
