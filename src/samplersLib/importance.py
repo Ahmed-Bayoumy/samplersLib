@@ -7,20 +7,20 @@
 #  email: ahmed.bayoumy@mail.mcgill.ca                                                #
 #                                                                                     #
 #  This program is free software: you can redistribute it and/or modify it under the  #
-#  terms of the BSD 3-Clause License as published by the Free Software                #
+#  terms of the GNU General Public License as published by the Free Software          #
 #  Foundation, either version 3 of the License, or (at your option) any later         #
 #  version.                                                                           #
 #                                                                                     #
 #  This program is distributed in the hope that it will be useful, but WITHOUT ANY    #
 #  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A    #
-#  PARTICULAR PURPOSE.  See the BSD 3-Clause License for more details.                #
+#  PARTICULAR PURPOSE.  See the GNU General Public License for more details.          #
 #                                                                                     #
-#  You should have received a copy of the BSD 3-Clause License along                  #
-#  with this program. If not, see <https://opensource.org/license/bsd-3-clause/>.     #
+#  You should have received a copy of the GNU General Public License along            #
+#  with this program. If not, see <http://www.gnu.org/licenses/>.                     #
 #                                                                                     #
 #  You can find information on SamplersLib at                                         #
 #  https://github.com/Ahmed-Bayoumy/samplersLib                                       #
-#  Copyright (C) 2026  Ahmed H. Bayoumy                                               #
+#  Copyright (C) 2024-2026  Ahmed H. Bayoumy                                          #
 # ------------------------------------------------------------------------------------#
 """
 
@@ -80,11 +80,7 @@ class DecisionTree:
         num_classes = len(np.unique(y))
 
         # Stopping conditions
-        if (
-            num_classes == 1
-            or num_samples < 2
-            or (self.max_depth and depth == self.max_depth)
-        ):
+        if num_classes == 1 or num_samples < 2 or (self.max_depth and depth == self.max_depth):
             return Counter(y).most_common(1)[0][0]
 
         best_split = None
@@ -98,9 +94,7 @@ class DecisionTree:
                 if info_gain > best_info_gain:
                     best_info_gain = info_gain
                     best_split = (feature_index, threshold)
-                    left_X, right_X, left_y, right_y = split_data(
-                        X, y, feature_index, threshold
-                    )
+                    left_X, right_X, left_y, right_y = split_data(X, y, feature_index, threshold)
 
         if best_split:
             feature_index, threshold = best_split
@@ -136,21 +130,15 @@ class DecisionTree:
         if isinstance(tree, dict):
             feature_index = tree["feature_index"]
             threshold = tree["threshold"]
-            left_X, right_X, left_y, right_y = split_data(
-                X, y, feature_index, threshold
-            )
+            left_X, right_X, left_y, right_y = split_data(X, y, feature_index, threshold)
 
             # Calculate the impurity reduction at this node
             info_gain = calculate_info_gain(X, y, feature_index, threshold)
             feature_importance[feature_index] += info_gain
 
             # Recurse into the left and right subtrees
-            self._calculate_feature_importance(
-                left_X, left_y, tree["left"], feature_importance
-            )
-            self._calculate_feature_importance(
-                right_X, right_y, tree["right"], feature_importance
-            )
+            self._calculate_feature_importance(left_X, left_y, tree["left"], feature_importance)
+            self._calculate_feature_importance(right_X, right_y, tree["right"], feature_importance)
 
 
 class RandomForest:

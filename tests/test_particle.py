@@ -42,8 +42,8 @@ def test_instantiation_with_position(bounds):
 
 def test_update_velocity(bounds):
     """Velocity update must follow the PSO equation."""
-    np.random.seed(0)          # deterministic random numbers for the test
-    p = Particle(bounds)
+    np.random.seed(0)  # deterministic random numbers for the test
+    p = Particle(bounds, seed=2)
 
     # Freeze current velocity to a known value
     p.velocity = np.array([0.5, -0.5])
@@ -61,9 +61,9 @@ def test_update_velocity(bounds):
     r1, r2 = 0.5488135, 0.71518937
 
     # Expected velocity according to the formula
-    expected = (inertia * p.velocity +
-                cognitive * r1 * (p.best_position - p.position) +
-                social * r2 * (global_best - p.position))
+    expected = (
+        inertia * p.velocity + cognitive * r1 * (p.best_position - p.position) + social * r2 * (global_best - p.position)
+    )
 
     p.update_velocity(global_best, inertia, cognitive, social)
 
@@ -96,7 +96,7 @@ def test_evaluate_updates_best(bounds):
 
     # Simple quadratic target: higher value = closer to origin
     def target(x):
-        return -np.sum(x ** 2)
+        return -np.sum(x**2)
 
     # First evaluation – should become the best
     p.evaluate(target)

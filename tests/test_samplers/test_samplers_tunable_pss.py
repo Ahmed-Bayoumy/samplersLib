@@ -4,6 +4,7 @@ import pytest
 # Import the class under test
 from samplersLib.samplers import TunablePSS
 
+
 # Helper to create a tiny synthetic problem
 def make_dummy_data(n_samples=5, n_dims=3, n_targets=2):
     rng = np.random.default_rng(0)
@@ -13,6 +14,7 @@ def make_dummy_data(n_samples=5, n_dims=3, n_targets=2):
     vlim = np.column_stack((np.zeros(n_dims), np.ones(n_dims)))
     return data, y, vlim
 
+
 @pytest.fixture
 def sampler():
     data, y, vlim = make_dummy_data()
@@ -20,7 +22,7 @@ def sampler():
     return TunablePSS(
         data=data,
         y=y,
-        x_inc=data[-1],          # use the same points as incumbents
+        x_inc=data[-1],  # use the same points as incumbents
         it=0,
         vlim=vlim,
         num_particles=10,
@@ -31,10 +33,12 @@ def sampler():
         seed=42,
     )
 
+
 def test_initialisation_weights(sampler):
     # weights should be created from the RF selectors and sum to 1
     assert hasattr(sampler, "_weights")
     assert np.isclose(sampler._weights.sum(), 1.0)
+
 
 def test_target_distribution(sampler):
     x = np.zeros(sampler.data.shape[1])
@@ -42,6 +46,7 @@ def test_target_distribution(sampler):
     # Gaussian density at the mean must be positive and equal to the normalising constant
     expected = 1.0 / np.sqrt((2 * np.pi) ** len(x))
     assert np.isclose(val, expected)
+
 
 def test_particle_swarm_sampling_limits(sampler):
     size = 8
@@ -55,8 +60,10 @@ def test_particle_swarm_sampling_limits(sampler):
     assert np.all(samples >= low - 1e-12)
     assert np.all(samples <= high + 1e-12)
 
+
 def test_resample_calls_pso_and_weights(sampler):
     size = 12
+
     # monkey‑patch the heavy PSO method to make the test deterministic & fast
     def fake_pso(_size):
         # return a deterministic grid inside the limits
@@ -76,6 +83,7 @@ def test_resample_calls_pso_and_weights(sampler):
     # returned values are drawn from the fake PSO grid
     assert np.all(np.isin(res[:, 0], np.linspace(0, 1, size)))
 
+
 def test_resample_without_weights():
     # Build a sampler with explicit zero weights to trigger the fallback path
     data, y, vlim = make_dummy_data()
@@ -87,7 +95,7 @@ def test_resample_without_weights():
         vlim=vlim,
         num_particles=5,
         max_iter=3,
-        weights=np.zeros(data.shape[1]),   # force zero‑weight branch
+        weights=np.zeros(data.shape[1]),  # force zero‑weight branch
     )
     # patch PSO to a simple deterministic output
     sampler.particle_swarm_sampling = lambda sz: np.full((sz, data.shape[1]), 0.5)
@@ -95,4 +103,3 @@ def test_resample_without_weights():
     out = sampler.resample(size=4, seed=0)
     # With zero weights the method should return the raw PSO samples unchanged
     assert np.allclose(out, 0.5)
-
