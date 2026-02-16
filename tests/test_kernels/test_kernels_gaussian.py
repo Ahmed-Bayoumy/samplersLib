@@ -1,9 +1,7 @@
-# test_kernels.py
 import numpy as np
 import pytest
 
-# Import the class under test
-from samplersLib.kernels import Gaussian, KERNEL_TYPE
+from samplersLib.kernels import KERNEL_TYPE, Gaussian
 
 
 @pytest.fixture
@@ -75,9 +73,9 @@ def test_univariate_kernel_missing_bandwidth(sample_data):
 def test_multivariate_kernel_full_covariance(sample_data):
     """When a full covariance matrix is supplied the multivariate path is used."""
     # Create a simple diagonal covariance for which the analytic result is known
-    cov = np.diag([0.25, 0.36])          # variances = 0.25, 0.36  → std = 0.5, 0.6
+    cov = np.diag([0.25, 0.36])  # variances = 0.25, 0.36  → std = 0.5, 0.6
     g = Gaussian(data=sample_data, h=[0.5, 0.6])
-    g._cov = cov                         # set directly for the test
+    g.replace_cov(cov)  # set directly for the test
 
     # Test point at the origin (z = 0) → exponent = 0
     z = np.zeros(2)
@@ -104,11 +102,11 @@ def test_multivariate_kernel_diagonal_fallback(sample_data):
     g = Gaussian(data=sample_data, h=bw, calculate_bw=False)
 
     # No covariance supplied → fallback path
-    z = np.array([0.5, -0.6])
+    z = [0.5, -0.6]
     h_arr = np.asarray(bw)
     scaled_z = z / h_arr
-    norm_const = np.prod(1 / (np.sqrt(2 * np.pi) * h_arr))
-    expected = norm_const * np.exp(-0.5 * np.sum(scaled_z ** 2))
+    log_norm_const = -0.5 * g._nd * np.log(2 * np.pi) - np.sum(np.log(h_arr))
+    expected = np.exp(log_norm_const - 0.5 * np.sum(scaled_z**2))
 
     np.testing.assert_allclose(g.kf_multivar(z), expected, rtol=1e-12)
 
@@ -119,4 +117,3 @@ def test_multivariate_kernel_missing_bandwidth(sample_data):
     g._cov = None
     with pytest.raises(ValueError, match="Bandwidth `h` must be set for fallback"):
         g.kf_multivar(np.array([0.0, 0.0]))
-

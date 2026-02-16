@@ -34,10 +34,9 @@ def bitpe_instance():
         bw_method=TUNING_METHOD.SCOTT.name,
         seed=12345,
         weights=None,
-        h=np.array([0.1]),
+        h=np.array([0.1]).tolist(),
         gamma=0.25,
     )
-
 
 
 # pylint: disable=missing-function-docstring
@@ -60,15 +59,11 @@ def test_instantiation_and_kernel_creation(bitpe_instance):
 def test_rank_data_and_initialize_kernels(bitpe_instance):
     # The good observations must be sorted by the associated f‑values
     sorted_idx = np.argsort(bitpe_instance.good_f_values)
-    np.testing.assert_array_equal(
-        bitpe_instance.good_obs, bitpe_instance.good_data[sorted_idx]
-    )
+    np.testing.assert_array_equal(bitpe_instance.good_obs, bitpe_instance.good_data[sorted_idx])
 
     # Same check for the bad observations
     sorted_idx_bad = np.argsort(bitpe_instance.bad_f_values)
-    np.testing.assert_array_equal(
-        bitpe_instance.bad_obs, bitpe_instance.bad_data[sorted_idx_bad]
-    )
+    np.testing.assert_array_equal(bitpe_instance.bad_obs, bitpe_instance.bad_data[sorted_idx_bad])
 
 
 # pylint: disable=missing-function-docstring
@@ -161,15 +156,17 @@ def test_combined_kernels_rosen(plotting=False):
         n_r=n_new_samples,
         vlim=v,
         kernel_type={"Cauchy": 0.5, "Gaussian": 0.5},
-        h=np.array([0.0001]),
+        h=[0.0001] * 10,
         seed=12345,
     )
     candidates = kde._suggest()
     print(candidates)
     print("Initial best f(x):", best_fx)
-    results = [rosen(c) for c in candidates]
 
-    assert np.any(np.array([r <= 2.5 for r in results]))
+    results = [rosen(c) for c in candidates]
+    print("Final best f(x):", min(results))
+
+    assert 1 - (min(results) / min(data_f)) > 0.85
 
 
 # pylint: disable=missing-function-docstring

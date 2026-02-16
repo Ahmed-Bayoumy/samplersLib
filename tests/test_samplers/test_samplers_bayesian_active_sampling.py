@@ -5,6 +5,7 @@ import pytest
 # Import the class under test
 from samplersLib.samplers import BayesianActiveSampling, KernelRidgeRegression
 
+
 # ----------------------------------------------------------------------
 # Helper fixtures
 # ----------------------------------------------------------------------
@@ -12,7 +13,7 @@ from samplersLib.samplers import BayesianActiveSampling, KernelRidgeRegression
 # pylint: disable=missing-function-docstring
 def synthetic_data():
     """Create a tiny 2‑D dataset with a simple quadratic objective."""
-    rng = np.random.RandomState(0) # pylint: disable=no-member
+    rng = np.random.RandomState(0)  # pylint: disable=no-member
     # 8 points in 2‑D
     X = rng.uniform(-1, 1, size=(8, 2))
     # f(x) = (x0‑0.2)^2 + (x1+0.3)^2  (minimum near (0.2, -0.3))
@@ -185,13 +186,8 @@ def test_bayesian_optimization_ensemble_runs(synthetic_data):
     model = KernelRidgeRegression(bandwidth=[0.2], kw_calculator=sampler._combined_kernel)
 
     # The method should return two lists (incumbents & their values) without error
-    x_best, y_best = sampler.bayesian_optimization_ensemble(
-        models=[model],
-        name="kr",
-        n_iterations=5
-    )
+    x_best, y_best = sampler.bayesian_optimization_ensemble(models=[model], name="kr", n_iterations=5)
     assert isinstance(x_best, list)
     assert isinstance(y_best, list)
     # lengths may be zero (no improvement) – just ensure they match
     assert len(x_best) == len(y_best)
-

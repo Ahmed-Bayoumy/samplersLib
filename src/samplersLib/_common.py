@@ -20,7 +20,7 @@
 #                                                                                     #
 #  You can find information on SamplersLib at                                         #
 #  https://github.com/Ahmed-Bayoumy/samplersLib                                       #
-#  Copyright (C) 2026  Ahmed H. Bayoumy                                               #
+#  Copyright (C) 2024-2026  Ahmed H. Bayoumy                                          #
 # ------------------------------------------------------------------------------------#
 """
 

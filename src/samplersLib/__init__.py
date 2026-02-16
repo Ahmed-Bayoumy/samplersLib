@@ -20,10 +20,10 @@
 #                                                                                     #
 #  You can find information on SamplersLib at                                         #
 #  https://github.com/Ahmed-Bayoumy/samplersLib                                       #
-#  Copyright (C) 2026  Ahmed H. Bayoumy                                               #
+#  Copyright (C) 2024-2026  Ahmed H. Bayoumy                                          #
 # ------------------------------------------------------------------------------------#
 """
 
-from samplersLib import samplers, kernels
+from samplersLib import kernels, samplers
 
-__all__ = ['samplers', 'kernels']
+__all__ = ["samplers", "kernels"]

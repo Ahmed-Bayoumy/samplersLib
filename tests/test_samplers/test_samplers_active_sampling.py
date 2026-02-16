@@ -113,7 +113,7 @@ def test_high_dimensional_path(high_dim_data, var_limits):
         vlim=var_limits,
         kernel_type=["Gaussian"],
         bw_method=TUNING_METHOD.SCOTT.name,
-        h=[0.1] * 2,
+        h=[0.1] * 3,
     )
     # The reducer is instantiated only for n_d > 3
     assert sampler.reducer is not None
@@ -132,7 +132,7 @@ def test_project_rd_to_original_space(high_dim_data, var_limits):
         vlim=var_limits,
         kernel_type=["Gaussian"],
         bw_method=TUNING_METHOD.SCOTT.name,
-        h=[0.1] * 2,
+        h=[0.1] * 3,
     )
     sampler.rd()
     # generate a few random points in reduced space
@@ -221,6 +221,6 @@ def test_kde_resample_is_deterministic_given_seed(simple_data):
     )
     # Run twice with the same seed – the internal RNG is re‑seeded only once at init,
     # but the stochastic path is deterministic for the duration of the test.
-    first = sampler.kde_resample(sampler.kernel, [1], sampler.data, seed=10000)
-    second = sampler.kde_resample(sampler.kernel, [1], sampler.data, seed=10000)
+    first = sampler.kde_resample(sampler.kernel, [1], sampler.data.tolist(), seed=10000)
+    second = sampler.kde_resample(sampler.kernel, [1], sampler.data.tolist(), seed=10000)
     np.testing.assert_allclose(first, second)

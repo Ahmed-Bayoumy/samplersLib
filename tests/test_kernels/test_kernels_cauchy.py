@@ -1,8 +1,8 @@
-# tests/test_cauchy_kernel.py
+from math import gamma
+
 import numpy as np
 import pytest
 
-# Import the class you want to test
 from samplersLib.kernels import KERNEL_TYPE, Cauchy
 
 
@@ -15,7 +15,7 @@ def sample_data():
 
 def test_instantiation_basic(sample_data):
     """Kernel should be instantiated without errors and set internal flags."""
-    k = Cauchy(data=sample_data, vlim=[[0, 1], [0, 1]], res=11, calculate_bw=False)
+    k = Cauchy(data=sample_data, vlim=[[0, 1], [0, 1]], calculate_bw=False)
 
     # basic attributes
     assert isinstance(k, Cauchy)
@@ -31,7 +31,7 @@ def test_instantiation_basic(sample_data):
 
 def test_instantiation_with_bandwidth(sample_data):
     """Providing a bandwidth list at construction must be stored correctly."""
-    bw = [0.5, 1.0]
+    bw = np.array([0.5, 1.0])
     k = Cauchy(data=sample_data, h=bw, calculate_bw=False)
 
     # bandwidth should be stored unchanged
@@ -62,16 +62,17 @@ def test_multivariate_covariance_branch(sample_data):
     """When a covariance matrix is present and well‑conditioned, the multivariate
     kernel should use the analytic expression."""
     # Create a kernel with a known covariance matrix
-    k = Cauchy(data=sample_data, calculate_bw=False)
+    k = Cauchy(data=sample_data, calculate_bw=True)
     # Manually inject a positive‑definite covariance matrix
     cov = np.cov(sample_data, rowvar=False)
-    k._cov = cov
+    k.replace_cov(cov)
+    d = 2
 
     # pick a vector and compute the expected value
     z = np.array([0.3, -0.7])
     inv_cov = np.linalg.inv(cov)
-    quad = z.T @ inv_cov @ z
-    expected = 1.0 / ((1.0 + quad) ** ((k._nd + 1) / 2.0))
+    quad_form = z.T @ inv_cov @ z
+    expected = gamma((d + 1) / 2.0) / (np.pi ** (d / 2.0) * gamma(0.5)) * (1.0 + quad_form) ** (-(d + 1) / 2.0)
 
     assert np.isclose(k.kf_multivar(z), expected, atol=1e-12)
 
@@ -87,8 +88,11 @@ def test_multivariate_fallback_branch(sample_data):
     z = np.array([0.5, -1.0])
     h_arr = np.asarray(bw)
     scaled = z / h_arr
+
+    denom = 1 + np.sum(scaled**2)
+    d = 2
     # fallback formula from the source code
-    expected = (1 / (np.pi * (1 + scaled**2))).mean()
+    expected = gamma((d + 1) / 2.0) / (np.pi ** (d / 2.0) * gamma(0.5)) * denom ** (-(d + 1) / 2.0)
 
     assert np.isclose(k.kf_multivar(z), expected, atol=1e-12)
 
@@ -97,7 +101,5 @@ def test_multivariate_missing_bandwidth_raises(sample_data):
     """If _cov is None and no bandwidth is supplied, a ValueError must be raised."""
     k = Cauchy(data=sample_data, calculate_bw=False)
     k._cov = None
-    with pytest.raises(
-        ValueError, match="Bandwidth `h` must be set for fallback multivariate kernel."
-    ):
+    with pytest.raises(ValueError, match="Bandwidth `h` must be set for multivariate kernel."):
         k.kf_multivar(np.zeros(2))

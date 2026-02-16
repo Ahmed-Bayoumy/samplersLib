@@ -20,17 +20,18 @@
 #                                                                                     #
 #  You can find information on SamplersLib at                                         #
 #  https://github.com/Ahmed-Bayoumy/samplersLib                                       #
-#  Copyright (C) 2026  Ahmed H. Bayoumy                                               #
+#  Copyright (C) 2024-2026  Ahmed H. Bayoumy                                          #
 # ------------------------------------------------------------------------------------#
 """
+
+from collections import defaultdict
+
 import numpy as np
 from scipy.stats import rankdata
-from collections import defaultdict
 
 
 class TrustWorthiness:
-
-    def __init__(self, ref, pred, method='average'):
+    def __init__(self, ref, pred, method="average"):
         self.ref = np.asarray(ref)
         self.pred = np.asarray(pred)
         self.method = method
@@ -100,8 +101,7 @@ class TrustWorthiness:
                 elif dx * dy < 0:
                     num_discordant += 1
 
-        denominator = np.sqrt((num_concordant + num_discordant + tie_x) *
-                              (num_concordant + num_discordant + tie_y))
+        denominator = np.sqrt((num_concordant + num_discordant + tie_x) * (num_concordant + num_discordant + tie_y))
 
         if denominator == 0:
             return 0.0
@@ -194,7 +194,7 @@ def compute_dimension_relevance(X, y, top_k=20):
 
     taus = np.nan_to_num(taus)  # Replace nan with 0
     taus = np.array(taus)
-    taus /= (np.sum(taus) + 1e-8)  # Normalize to form a probability distribution
+    taus /= np.sum(taus) + 1e-8  # Normalize to form a probability distribution
     return taus
 
 
