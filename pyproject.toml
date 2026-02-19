@@ -15,7 +15,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: BSD License",  # Use this standardized version
+     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",  # Use this standardized version
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
 ]
@@ -67,13 +67,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/samplersLib"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/samplersLib" = "samplersLib"
-
 # This ensures Hatch doesn't exclude the binaries
 [tool.hatch.build]
 artifacts = [
     "*.pyd",
     "*.so",
+]
+exclude = [
+  # Exclude any unwanted files that might be picked up by default
+  "src/samplersLib/__pycache__",
+  "src/samplersLib/*.pyc",
+  "src/samplersLib/*.pyo"
 ]
 
