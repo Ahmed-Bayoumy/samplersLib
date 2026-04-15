@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy>=2.0.0, <2.1.0",   # 🟢 The "Safe Zone" for ML (PyTorch & Scikit-learn)
+    "numpy>=2.2.6",   # 🟢 The "Safe Zone" for ML (PyTorch & Scikit-learn)
     "pandas>=2.2.2, <3.0.0",  # 🟢 Keeps Colab internal UI stable
     "scikit-learn>=1.5.0",    # 🟢 Ensures NumPy 2.0 support
     "plotly>=5.24.1",
