@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+
 # ----------------------------------------------------------------------
 # Simple mock predictor – behaves deterministically and returns a fixed
 # uncertainty.  It implements the same public API that AdaptiveEnsemble
@@ -32,9 +33,9 @@ class MockPredictor:
 @pytest.fixture
 def three_models():
     return [
-        MockPredictor(bias=0.0, scale=1.0, uncert=0.1),   # model A
-        MockPredictor(bias=1.0, scale=0.5, uncert=0.2),   # model B
-        MockPredictor(bias=-0.5, scale=2.0, uncert=0.05)  # model C
+        MockPredictor(bias=0.0, scale=1.0, uncert=0.1),  # model A
+        MockPredictor(bias=1.0, scale=0.5, uncert=0.2),  # model B
+        MockPredictor(bias=-0.5, scale=2.0, uncert=0.05),  # model C
     ]
 
 
@@ -49,7 +50,7 @@ def test_instantiation(three_models):
     assert isinstance(ae, AdaptiveEnsemble)
     assert ae.n_models == 3
     # uniform start → each weight = 1/3
-    np.testing.assert_allclose(ae.weights, np.full(3, 1/3))
+    np.testing.assert_allclose(ae.weights, np.full(3, 1 / 3))
 
 
 # ----------------------------------------------------------------------
@@ -79,9 +80,7 @@ def test_predict_weighted_average(three_models):
 
     # manual weighted average with uniform weights (1/3 each)
     expected = (
-        (1/3) * three_models[0].predict(x) +
-        (1/3) * three_models[1].predict(x) +
-        (1/3) * three_models[2].predict(x)
+        (1 / 3) * three_models[0].predict(x) + (1 / 3) * three_models[1].predict(x) + (1 / 3) * three_models[2].predict(x)
     )
     np.testing.assert_allclose(ae.predict(x), expected)
 
@@ -102,7 +101,7 @@ def test_uncertainty_combination(three_models):
     variance = np.dot(ae.weights, (preds - mean_pred) ** 2)
     weighted_uncert = np.dot(ae.weights, uncerts)
 
-    expected = np.sqrt(weighted_uncert ** 2 + variance)
+    expected = np.sqrt(weighted_uncert**2 + variance)
     np.testing.assert_allclose(ae.uncertainty(x), expected)
 
 
@@ -127,7 +126,7 @@ def test_predict_with_zscore(three_models):
 
         mean = np.dot(ae.weights, preds)
         var = np.dot(ae.weights, (preds - mean) ** 2)
-        weighted_unc_sq = np.dot(ae.weights, uncerts ** 2)
+        weighted_unc_sq = np.dot(ae.weights, uncerts**2)
         sigma = np.sqrt(weighted_unc_sq + var)
 
         z_expected.append((y - mean) / sigma)
@@ -145,13 +144,27 @@ def test_calculate_testing_error(three_models):
     ae = AdaptiveEnsemble(models=three_models)
 
     xps = [np.array([0.0]), np.array([1.0]), np.array([2.0])]
-    yps = [0.0, 1.5, 4.0]   # arbitrary ground‑truth values
+    yps = [0.0, 1.5, 4.0]  # arbitrary ground‑truth values
 
     # manual MSE
     mse = 0.0
     for x, y in zip(xps, yps):
         preds = np.array([m.predict(x) for m in three_models])
         mse += (y - np.dot(ae.weights, preds)) ** 2
-    mse /= (len(xps) - 1)   # note: the original code divides by i (last index)
+    mse /= len(xps) - 1  # note: the original code divides by i (last index)
 
     np.testing.assert_allclose(ae.calculate_testing_error(xps, yps), mse)
+
+
+def test_kdtree_query_returns_neighbor_indices():
+    from samplersLib.predictors import KDTree
+
+    X = np.array([[0.0], [1.0], [2.0], [3.0]])
+    y = np.array([0.0, 1.0, 2.0, 3.0])
+    tree = KDTree(X, y)
+
+    results = tree.query(np.array([1.2]), k=2)
+
+    assert len(results) == 2
+    assert all(isinstance(idx, (int, np.integer)) for _, idx, _ in results)
+    assert [idx for _, idx, _ in results] == [1, 2]
