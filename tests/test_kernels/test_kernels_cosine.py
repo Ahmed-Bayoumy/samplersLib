@@ -27,7 +27,8 @@ def test_multivariate_value_and_support():
     u = np.array([[0.5, 1.0]])
     prod_u = np.prod(u)
     prod_h = np.prod(h)
-    expected = (1 / (2 * prod_h)) ** len(u) * np.cos(np.pi * prod_u / prod_h)
+    d = u.shape[-1]  # dimensionality, not len(u) (u.shape[0] == 1 batch row)
+    expected = (1 / (2 * prod_h)) ** d * np.cos(np.pi * prod_u / prod_h)
     assert np.isclose(k.kf_multivar(u), expected)
 
     u_out = np.array([[3.0, 1.0]])  # first coord outside support

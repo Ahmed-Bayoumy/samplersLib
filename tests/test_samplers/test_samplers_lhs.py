@@ -73,6 +73,36 @@ def test_expand_lhs_basic(var_limits):
     assert np.all(expanded <= var_limits[:, 1])
 
 
+def _finishes(fn, timeout=30.0):
+    """Run `fn` in a daemon thread; fail instead of hanging the suite."""
+    import threading
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault("res", fn()), daemon=True)
+    t.start()
+    t.join(timeout)
+    assert not t.is_alive(), "sampler did not finish (infinite loop?)"
+    return out["res"]
+
+
+@pytest.mark.parametrize("dim", [1, 2, 5])
+def test_generate_samples_exactse_single_sample(dim):
+    """A one-sample ExactSE plan has no rows to exchange; the optimizer used
+    to loop forever looking for a second distinct row."""
+    vlim = np.array([[-5.0, 5.0]] * dim)
+    lhs = LHS(ns=1, vlim=vlim)
+    samples = _finishes(lhs.generate_samples)
+    assert samples.shape == (1, dim)
+    assert np.all(samples >= vlim[:, 0]) and np.all(samples <= vlim[:, 1])
+
+
+def test_expand_lhs_single_point(var_limits):
+    """Expanding by one point builds a one-sample ExactSE plan internally."""
+    lhs = LHS(ns=4, vlim=var_limits)
+    base = lhs.generate_samples()
+    expanded = _finishes(lambda: lhs.expand_lhs(base, n_points=1, method="basic"))
+    assert expanded.shape[0] == base.shape[0] + 1
+
+
 def test_expand_lhs_exactse(var_limits):
     """`expand_lhs` with method='ExactSE' must still return a correctly‑shaped array."""
     np.random.seed(3)

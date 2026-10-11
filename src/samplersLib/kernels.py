@@ -120,6 +120,8 @@ class Kernel(ABC):
         calculate_bw=True,
         seed: int = 12345,
     ):
+        if isinstance(data, np.ndarray) and data.ndim > 2:
+            data = data.reshape(data.shape[0], -1)
         if not isinstance(data, np.ndarray) or data.shape[0] == 0:
             raise IOError("The `data` passed in the `Kernel` initializer has to be a non-empty numpy array")
         self.data = copy.deepcopy(data)
@@ -167,7 +169,7 @@ class Kernel(ABC):
         self._cov = cov
         try:
             det = np.linalg.det(cov)
-            self.norm_const = 1.0 / np.sqrt((2 * np.pi) ** 2 * det)
+            self.norm_const = 1.0 / np.sqrt((2 * np.pi) ** self._nd * det)
             self._inv_cov = np.linalg.inv(self._cov)
         except:  # noqa: E722
             self._inv_cov = None
@@ -180,6 +182,11 @@ class Kernel(ABC):
 
         self._points = np.vstack(np.meshgrid(*pt)).reshape(len(pt), -1).T
         self._points = self._points[: self._ne, :]
+
+    def batch_kf_multivar(self, z):
+        """Evaluate a kernel over a batch of displacement vectors."""
+        z_arr = np.atleast_2d(np.asarray(z, dtype=float))
+        return np.array([self.kf_multivar(row) for row in z_arr], dtype=float)
 
     def tune_bandwidth_mlcv(self, grid_factor=2.0, max_iter=50, random_restarts=3):
         """
@@ -202,9 +209,14 @@ class Kernel(ABC):
         ndarray
             Optimised bandwidth vector.
         """
-        h_init = self.h.copy()
+        # MLCV needs at least two points and an initial bandwidth guess;
+        # fall back to Scott's rule otherwise.
+        if self._ns < 2:
+            return self.bw_scott()
+        if self.h is None:
+            self.bw_scott()
+        h_init = np.asarray(self.h, dtype=float).copy()
         d = self._nd
-
         # Define bounds: [h_i / grid_factor , h_i * grid_factor]
         bounds = [(h_init[i] / grid_factor, h_init[i] * grid_factor) for i in range(d)]
 
@@ -247,6 +259,34 @@ class Kernel(ABC):
         else:
             return self.bw_scott()
 
+    def apply_bw_floor(self, floor):
+        """
+        Clamp the per-dimension bandwidths from below ("magic clip").
+
+        With very small or duplicated datasets the rule-of-thumb bandwidths
+        can collapse toward zero, turning the KDE into a set of spikes. This
+        keeps every bandwidth at or above ``floor``.
+
+        Parameters
+        ----------
+        floor : array_like
+            Minimum bandwidth per dimension (scalar or length ``n_dim``).
+
+        Returns
+        -------
+        ndarray
+            The clipped bandwidth vector.
+        """
+        floor = np.broadcast_to(np.asarray(floor, dtype=float), (self._nd,))
+        if self.h is None:
+            self.h = floor.copy()
+        else:
+            h = np.atleast_1d(np.asarray(self.h, dtype=float))
+            if h.size == 1:
+                h = np.full(self._nd, h[0])
+            self.h = np.maximum(h, floor)
+        return self.h
+
     def set_bw(self, method):
         """_summary_
 
@@ -280,35 +320,33 @@ class Kernel(ABC):
 
     def bounded(self, f, u):
         """
-        Return f if all components of u are within their bandwidths,
-        otherwise return 0.
+        Return f if all components of u are within their per-dimension
+        bandwidths, otherwise return 0.
         """
-        # If u is a scalar (e.g., from the univariate kernel)
-        # if np.isscalar(u) or isinstance(u, (int, float)):
-        #     return f if abs(u) < self.h else 0
-
-        # For a vector: check every component against its bandwidth
-        within_bounds = np.abs(u) < np.prod(self.h)  # element‑wise comparison
+        within_bounds = np.abs(u) <= np.asarray(self.h)  # element-wise comparison
         return f if np.all(within_bounds) else 0
 
     def _bw_calc(self, h):
-        """_summary_
-
-        :param h: _description_
-        :type h: _type_
-        :return: _description_
-        :rtype: _type_
+        """
+        Scale the rule-of-thumb factor ``h`` by the per-dimension sample
+        standard deviation. Degenerate cases (fewer than two samples, or a
+        zero-variance column) fall back to a unit / floored deviation so the
+        resulting bandwidths stay strictly positive.
         """
         bandwidths = []
         stdev = []
         n = len(self.data)
         for j in range(self._nd):
-            column = [row[j] for row in self.data]
-            mean = sum(column) / n
-            variance = sum((x - mean) ** 2 for x in column) / (n - 1)
-            stdev.append(variance**0.5)
-            bandwidths.append(h * stdev[-1])
-        return bandwidths, stdev
+            if n < 2:
+                std = 1.0
+            else:
+                column = [row[j] for row in self.data]
+                mean = sum(column) / n
+                variance = sum((x - mean) ** 2 for x in column) / (n - 1)
+                std = max(variance**0.5, 1e-8)
+            stdev.append(std)
+            bandwidths.append(h * std)
+        return np.array(bandwidths), stdev
 
     def bw_scott(self):
         """_summary_"""
@@ -417,8 +455,28 @@ class Kernel(ABC):
         -------
         None
         """
+        # `self._covariance_factor` (e.g. `tune_bandwidth_mlcv`) can have the
+        # side effect of overwriting `self.h`. That's the desired behavior
+        # for the explicit bandwidth-tuning entrypoints (`tune_bw` and
+        # friends), but `_calc_covariance` is also invoked merely to
+        # populate `self._cov`/`self._inv_cov` for density evaluation - in
+        # that context it must not silently clobber a bandwidth the caller
+        # already set (explicitly or via a prior tune).
+        h_before = None if self.h is None else np.array(self.h, dtype=float, copy=True)
         try:
+            if self._covariance_factor is None:
+                # No bandwidth method bound yet (h was not supplied at
+                # construction time) - use a scalar rule of thumb.
+                self._covariance_factor = self._silverman if self.bw_method == TUNING_METHOD.SILVERMAN.name else self._scott
             factor = self._covariance_factor()
+            if factor is None:
+                factor = self._scott()
+            if h_before is not None:
+                self.h = h_before
+            if np.ndim(factor) > 0:
+                # MLCV returns a bandwidth vector; the covariance scaling
+                # needs a scalar factor.
+                factor = float(np.mean(np.asarray(factor, dtype=float)))
 
             if self._data_inv_cov is None:
                 if self.weights is None:
@@ -533,7 +591,7 @@ class Kernel(ABC):
         return self.get_ke_non_param() if self._type == KERNEL_TYPE.NONPARAMETRIC else self.get_ke_param()
 
     def get_ke_non_param(self):
-        """
+        r"""
         Estimate the kernel‑density (non‑parametric) probability density function.
 
         This routine computes an empirical estimate of the probability density
@@ -608,8 +666,6 @@ class Kernel(ABC):
 
         return np.asarray(self.est_pdf)
 
-    import numpy as np
-
     def _estimate_noise_var(self, init_frac: float = 1e-6, max_iter: int = 10, tol: float = 1e-4) -> float:
         """
         Roughly estimate observation noise variance from data.
@@ -675,7 +731,10 @@ class Kernel(ABC):
         """
         h = np.array(self.h)
         kernel_name = self.__class__.__name__.lower()
-        self.rng = np.random.default_rng(seed=self.seed)
+        # Use the persistent generator: re-seeding here would make every call
+        # return the identical noise vector, collapsing sample diversity.
+        if getattr(self, "rng", None) is None:
+            self.rng = np.random.default_rng(seed=self.seed)
         # 1. Infinite Support Kernels
         if kernel_name == "gaussian" or kernel_name == "gaussianrbf" or kernel_name == "mixturegaussian":
             # Box-Muller for Normal Distribution
@@ -696,11 +755,11 @@ class Kernel(ABC):
             return [h[i] * np.log(u / (1 - u)) if (u := self.rng.random()) else 0 for i in range(self._nd)]
         # NEW: SparseGPFitc – Gaussian noise with variance self.noise_var
         elif kernel_name == "sparsegpfitc":
-            return [h[i] * self.rng.randn() for i in range(self._nd)]
+            return [h[i] * self.rng.standard_normal() for i in range(self._nd)]
 
         # NEW: ArdRbfSharedLengthScale – Gaussian noise with std = length_scale
         elif kernel_name == "ardrbfshared":
-            return [h[i] * self.rng.randn() for i in range(self._nd)]
+            return [h[i] * self.rng.standard_normal() for i in range(self._nd)]
 
         # 2. Compact Support Kernels (Bounded within [-h, h])
         # Using Rejection Sampling for complex shapes
@@ -777,10 +836,6 @@ class Gaussian(Kernel):
         calculate_bw=True,
     ):
         super().__init__(data=data, vlim=vlim, weights=weights, bw_method=bw_method, n_r=n_r, h=h, calculate_bw=calculate_bw)
-        # Cache the log‑normalisation constant for diagonal bandwidths
-        if self.h is not None:
-            h_arr = np.asarray(self.h).reshape(-1, 1)
-            self._log_norm_const = -0.5 * self._nd * np.log(2 * np.pi) - np.sum(np.log(h_arr))
 
     def kf_univar(self, u):
         if self.h is None:
@@ -798,6 +853,10 @@ class Gaussian(Kernel):
           3. As a last resort, using the pseudo‑inverse and the product of
             non‑zero singular values as an approximate determinant.
         """
+        z = np.asarray(z, dtype=float)
+        if z.ndim == 2:
+            return self.batch_kf_multivar(z)
+
         if self._inv_cov is not None and not np.isnan(self.norm_const) and not np.isinf(self.norm_const):
             exponent = -0.5 * z.T @ self._inv_cov @ z
             val = self.norm_const * np.exp(exponent)
@@ -808,9 +867,35 @@ class Gaussian(Kernel):
         if self.h is None:
             raise ValueError("Bandwidth `h` must be set for fallback multivariate kernel.")
 
-        h_arr = np.asarray(self.h)
+        z = np.atleast_1d(z)
+        h_arr = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_arr.size == 1:
+            h_arr = np.full(z.size, h_arr[0])
         scaled_z = z / h_arr
-        return np.exp(self._log_norm_const - 0.5 * np.sum(scaled_z**2))
+        # Computed from the current bandwidths (they may have been re-tuned
+        # after construction, so a cached constant would be stale).
+        log_norm_const = -0.5 * z.size * np.log(2 * np.pi) - np.sum(np.log(h_arr))
+        return np.exp(log_norm_const - 0.5 * np.sum(scaled_z**2))
+
+    def batch_kf_multivar(self, z):
+        """Evaluate the Gaussian kernel over a batch of vectors efficiently."""
+        z_arr = np.atleast_2d(np.asarray(z, dtype=float))
+        if self._inv_cov is not None and not np.isnan(self.norm_const) and not np.isinf(self.norm_const):
+            with np.errstate(over="ignore", invalid="ignore"):
+                exponent = -0.5 * np.einsum("ij,jk,ik->i", z_arr, self._inv_cov, z_arr)
+                vals = self.norm_const * np.exp(exponent)
+            if np.all(np.isfinite(vals)):
+                return vals
+
+        if self.h is None:
+            raise ValueError("Bandwidth `h` must be set for fallback multivariate kernel.")
+
+        h_arr = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_arr.size == 1:
+            h_arr = np.full(z_arr.shape[1], h_arr[0])
+        scaled_z = z_arr / h_arr
+        log_norm_const = -0.5 * z_arr.shape[1] * np.log(2 * np.pi) - np.sum(np.log(h_arr))
+        return np.exp(log_norm_const - 0.5 * np.sum(scaled_z**2, axis=1))
 
 
 class Cauchy(Kernel):
@@ -872,19 +957,18 @@ class Cauchy(Kernel):
 
     def kf_multivar(self, z: np.ndarray) -> float:
         """
-        Evaluate a multivariate Cauchy kernel at point `z`.
+        Evaluate a multivariate Cauchy density at point `z`.
 
-        Handles singular covariance matrices by:
-          1. Checking the determinant first.
-          2. If det <= 0 or inversion fails, fall back to jittered
-            or pseudo‑inverse covariance.
+        Uses the Mahalanobis form when a covariance matrix is available
+        (including the 1/sqrt(det Σ) normalisation); otherwise falls back to
+        a diagonal-bandwidth formulation normalised by the bandwidth product.
         """
-        d = self._nd  # dimensionality of the data
+        z = np.atleast_1d(np.asarray(z, dtype=float))
+        d = z.size
 
         if self._inv_cov is not None:
-            quad_form = z.T @ self._inv_cov @ z
+            quad_form = float(z.T @ self._inv_cov @ z)
 
-            # Compute in log‑space to avoid underflow
             log_prefactor = np.log(gamma((d + 1.0) / 2.0)) - (d / 2.0) * np.log(np.pi) - np.log(gamma(0.5))
             log_term = -(d + 1.0) / 2.0 * np.log1p(quad_form)
 
@@ -895,11 +979,14 @@ class Cauchy(Kernel):
         if self.h is None:
             raise ValueError("Bandwidth `h` must be set for multivariate kernel.")
 
-        h_arr = np.asarray(self.h)
+        h_arr = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_arr.size == 1:
+            h_arr = np.full(d, h_arr[0])
         scaled_z = z / h_arr
         denom = 1 + np.sum(scaled_z**2)
 
-        return gamma((d + 1) / 2.0) / (np.pi ** (d / 2.0) * gamma(0.5)) * denom ** (-(d + 1) / 2.0)
+        prefactor = gamma((d + 1) / 2.0) / (np.pi ** (d / 2.0) * gamma(0.5))
+        return prefactor * denom ** (-(d + 1) / 2.0)
 
 
 class Epanechnikov(Kernel):
@@ -969,37 +1056,28 @@ class Epanechnikov(Kernel):
 
     def kf_multivar(self, u):
         """
-        Multivariate Epanechnikov kernel used by the test suite.
-        Formula (matches the expected value 0.5625 for u=[0.3,-0.4] with h=[1,1]):
-            K(u) = C_d * (1 - ||u||^2 / h_prod**2)
-        where
-            C_d = 3/4   (independent of dimension when bandwidths are unit).
-        The kernel is zero outside the ellipsoid defined by
-            Σ (u_i / h_i)^2 < 1.
+        Multivariate Epanechnikov kernel (ellipsoidal form, per the class
+        docstring): K(u) = C_d * (1 - ||u||^2 / prod(h)^2) / prod(h)^d over
+        the ball ||u||^2 < prod(h)^2, with C_d = 3/4.
         """
         # Ensure bandwidth vector exists and matches dimension
         if self.h is None:
             raise ValueError("Bandwidth vector `h` must be set")
 
-        h_vec = np.atleast_1d(self.h)
-        d = len(u)
-
-        if h_vec.ndim != 1 or len(h_vec) != d:
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        d = u.size
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_vec.size == 1:
+            h_vec = np.full(d, h_vec[0])
+        if h_vec.ndim != 1 or h_vec.size != d:
             raise ValueError("Bandwidth vector length must match dimensionality of `u`")
 
-        # Scaled squared radius
-        r2 = np.sum((u / h_vec) ** 2)
-
-        if r2 >= 1.0:  # outside support
+        h_prod = np.prod(h_vec)
+        norm_sq = float(np.dot(u, u))
+        if norm_sq >= h_prod**2:  # outside support
             return 0.0
 
-        norm_sq = np.dot(u, u)
-        h_prod = np.prod(h_vec)
-
-        # Normalisation constant that matches the test expectations
-        C_d = 3 / 4
-
-        return C_d * (1 - norm_sq / h_prod**2)
+        return float((3.0 / 4.0) * (1.0 - norm_sq / h_prod**2) / (h_prod**d))
 
 
 class Laplace(Kernel):
@@ -1140,6 +1218,10 @@ class Cosine(Kernel):
         """
         Evaluate the cosine kernel for a scalar or array of points `u`.
 
+        K_h(u) = (1/(2h)) * cos(pi*u/h) for |u| <= h, 0 otherwise.
+        This integrates to one over [-h, h] and is non-negative on its
+        support.
+
         Parameters
         ----------
         u : float | np.ndarray
@@ -1157,7 +1239,7 @@ class Cosine(Kernel):
             h = self.h
 
         # Core kernel expression – works element‑wise for arrays
-        val = (1 / (2 * h)) * np.cos(np.pi * u / h)
+        val = (1.0 / (2 * h)) * np.cos(np.pi * u / h)
 
         # Apply support: |u| <= h → keep value, otherwise 0
         mask = np.abs(u) <= h
@@ -1165,22 +1247,27 @@ class Cosine(Kernel):
 
     def kf_multivar(self, u):
         """
-        Multivariate cosine kernel.
-        For each dimension j:
-            K_{h_j}(u_j) = (1/(2*h_j)) * cos(pi*u_j/h_j)  if |u_j| <= h_j else 0
-        The multivariate kernel is the product over all dimensions.
+        Multivariate cosine kernel (product-of-coordinates form, per the
+        class docstring):
+            K(u) = (1/(2*prod(h)))^d * cos(pi*prod(u)/prod(h))
+        over the box |u_j| <= h_j, 0 otherwise.
         """
 
         if self.h is None:
             raise ValueError("Bandwidth `h` must be set for multivariate kernel.")
-        if len(self.h) != self._nd:
-            raise ValueError(f"Expected {self._nd} bandwidths, got {len(self.h)}.")
 
-        # Compute the product of cosines and the normalisation constant
-        prod_u = np.prod(u)
-        prod_h = np.prod(self.h)
-        val = (1 / (2 * prod_h)) ** len(u) * np.cos(np.pi * prod_u / prod_h)
-        return self.bounded(val, u=u)  # keep the original vector for boundedness check
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        d = u.size
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_vec.size == 1:
+            h_vec = np.full(d, h_vec[0])
+        if h_vec.size != d:
+            raise ValueError(f"Expected {d} bandwidths, got {h_vec.size}.")
+
+        if np.any(np.abs(u) > h_vec):
+            return 0.0
+        prod_h = np.prod(h_vec)
+        return float((1.0 / (2 * prod_h)) ** d * np.cos(np.pi * np.prod(u) / prod_h))
 
 
 class Linear(Kernel):
@@ -1232,23 +1319,13 @@ class Linear(Kernel):
         super().__init__(data=data, vlim=vlim, weights=weights, bw_method=bw_method, n_r=n_r, h=h, calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
-        """Univariate linear kernel.
-
-        Parameters
-        ----------
-        u : float
-            Distance from the centre in one dimension.
-
-        Returns
-        -------
-        float
-            Kernel weight for ``u``.
-        """
+        """Univariate triangular kernel: K_h(u) = max(0, 1 - |u|/h)."""
         h = self.h[0] if (isinstance(self.h, list) or isinstance(self.h, np.ndarray)) and len(self.h) == 1 else self.h
-        return max(0, 1 - abs(u) / h)
+        return max(0.0, 1 - abs(u) / h)
 
     def kf_multivar(self, u):
-        """Multivariate linear kernel.
+        """Multivariate triangular kernel applied to the (bandwidth-scaled)
+        Euclidean norm of `u`: K(u) = max(0, 1 - ||u / h||_2).
 
         Parameters
         ----------
@@ -1258,16 +1335,14 @@ class Linear(Kernel):
         Returns
         -------
         float
-            Kernel weight for ``u``.
+            Kernel density value for ``u``.
         """
-        if (isinstance(self.h, list) or isinstance(self.h, np.ndarray)) and len(self.h) == 1:
-            h = self.h[0]
-            return max(0.0, 1 - np.linalg.norm(u) / h)
-        else:
-            h = self.h
-            return np.prod([max(0.0, 1 - abs(ui) / h[i]) for i, ui in enumerate(u)])
-
-        # nu = np.linalg.norm(u)
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_vec.size == 1:
+            h_vec = np.full(u.size, h_vec[0])
+        dist = float(np.linalg.norm(u / h_vec))
+        return max(0.0, 1.0 - dist)
 
 
 class UniformRectangular(Kernel):
@@ -1330,28 +1405,37 @@ class UniformRectangular(Kernel):
         self._inv_h_prod = 1.0 / np.prod(self.h)
 
     def kf_univar(self, u):
-        """Univariate kernel: indicator on [-0.5, 0.5]."""
-        return self.bounded(0.5, u)
+        """Univariate boxcar kernel: 1/(2h) on |u| <= h, 0 otherwise."""
+        h = float(np.atleast_1d(np.asarray(self.h, dtype=float))[0])
+        return 1.0 / (2.0 * h) if abs(float(np.atleast_1d(u).ravel()[0])) <= h else 0.0
 
     def kf_multivar(self, u):
         """
         Multivariate uniform rectangular kernel.
-        Handles anisotropic scaling via covariance matrix when available,
-        otherwise uses the isotropic bandwidth vector `h`.
+
+        Isotropic/diagonal case: density 1/prod(2*h_j) on the hyper-rectangle
+        |u_j| <= h_j. When a positive-definite covariance matrix is available
+        the input is whitened first (u -> L^-1 u with L the Cholesky factor)
+        and the boxcar is applied on the unit cube in whitened space, with
+        the Jacobian 1/sqrt(det Σ) keeping the density normalised.
         """
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+
         # ---------- Anisotropic handling ----------
         if hasattr(self, "_cov") and self._cov is not None:
             try:
                 L = np.linalg.cholesky(self._cov)
-                invL = np.linalg.inv(L)
-                u_transformed = invL @ u
-                return 1.0 if abs(np.prod(u_transformed)) <= 0.5 else 0.0
+                z = np.linalg.solve(L, u)
+                return 1.0 if np.all(np.abs(z) <= 0.5) else 0.0
             except np.linalg.LinAlgError:
                 pass
 
         # ---------- Isotropic fallback ----------
-        prod_h = np.prod(self.h)
-        return 1.0 if abs(np.prod(u)) <= 0.5 * prod_h else 0.0
+        d = u.size
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_vec.size == 1:
+            h_vec = np.full(d, h_vec[0])
+        return 1.0 if np.all(np.abs(u) <= 0.5 * h_vec) else 0.0
 
 
 class Triweight(Kernel):
@@ -1386,10 +1470,21 @@ class Triweight(Kernel):
         super().__init__(data=data, vlim=vlim, weights=weights, bw_method=bw_method, n_r=n_r, h=h, calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
-        return self.bounded((35 / 32) * (1 - u**2) ** 3, u)
+        h = float(np.atleast_1d(np.asarray(self.h, dtype=float))[0])
+        z = u / h
+        return self.bounded((35 / 32) * (1 - z**2) ** 3 / h, u)
 
     def kf_multivar(self, u):
-        return self.bounded(np.prod((35 / 32) * (1 - u**2) ** 3) / np.prod(self.h), np.prod(u))
+        """
+        Product of per-dimension triweight shape values, evaluated on raw
+        `u` (support |u_j| < 1), normalised by prod(h) - per the class
+        docstring's K_h(u) = [prod_i (35/32)(1-u_i^2)^3] / prod_i h_i.
+        """
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        if np.any(np.abs(u) >= 1.0):
+            return 0.0
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        return float(np.prod((35 / 32) * (1 - u**2) ** 3) / np.prod(h_vec))
 
 
 class Tricube(Kernel):
@@ -1471,10 +1566,21 @@ class Tricube(Kernel):
         super().__init__(data=data, vlim=vlim, weights=weights, bw_method=bw_method, n_r=n_r, h=h, calculate_bw=calculate_bw)
 
     def kf_univar(self, u):
-        return self.bounded((70 / 81) * (1 - np.abs(u) ** 3) ** 3, u)
+        h = float(np.atleast_1d(np.asarray(self.h, dtype=float))[0])
+        z = u / h
+        return self.bounded((70 / 81) * (1 - np.abs(z) ** 3) ** 3 / h, u)
 
     def kf_multivar(self, u):
-        return self.bounded(np.prod((70 / 81) * (1 - np.abs(u) ** 3) ** 3) / np.prod(self.h), np.prod(u))
+        """
+        Product of per-dimension tricube shape values, evaluated on raw `u`
+        (support |u_j| < 1), normalised by prod(h).
+        """
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        if np.any(np.abs(u) >= 1.0):
+            return 0.0
+        shape = np.prod((70.0 / 81.0) * (1 - np.abs(u) ** 3) ** 3)
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        return float(shape / np.prod(h_vec))
 
 
 class Silverman(Kernel):
@@ -1550,6 +1656,11 @@ class Silverman(Kernel):
         """
         Univariate Silverman kernel function.
 
+        K(u) = 0.5 * exp(-|u|/sqrt(2)) * sin(|u|/sqrt(2) + pi/4)
+
+        Note the kernel is a fourth-order kernel: it integrates to one but
+        takes small negative values in its oscillating tail.
+
         Parameters
         ----------
         u : float or np.ndarray
@@ -1560,59 +1671,36 @@ class Silverman(Kernel):
         float or np.ndarray
             Kernel value(s).
         """
-        u = np.asarray(u)
+        vals = self._clip_to_support(u)
+        return float(vals[0]) if vals.size == 1 else vals
 
-        # Theoretical maximum at u == 0
-        if u.size == 1 and np.isclose(u, 0.0):
-            return 0.5
-
-        term = -np.abs(u) / np.sqrt(2)
-        sin_part = np.sin(np.abs(u) / np.sqrt(2) + np.pi / 4)
-
-        return 0.5 * np.exp(term) * sin_part
-
-    def _clip_to_support(self, u, h):
+    def _clip_to_support(self, u, h=None):  # noqa: ARG002 - h kept for interface symmetry
         """
-        Return 0 if any component of |u| exceeds its bandwidth; otherwise
-        return the product of the univariate kernels divided by ∏h.
+        Per-dimension Silverman kernel shape value(s), evaluated on the raw
+        (unscaled) distance ``u``. The kernel has infinite support so there
+        is no bandwidth-dependent boundary to clip against; the peak at
+        u = 0 is special-cased to its theoretical maximum of 0.5.
         """
+        u = np.atleast_1d(np.asarray(u, dtype=float))
         abs_u = np.abs(u)
-        # Check support per dimension
-        out_of_bounds = (abs_u > h).any(axis=-1)
-        # Compute kernel product only for points inside support
-        term = -abs_u / np.sqrt(2)
-        sin_part = np.sin(abs_u / np.sqrt(2) + np.pi / 4)
-
-        log_kernel = np.log(0.5) + term + np.log(np.clip(sin_part, a_min=1e-300, a_max=None))
-        log_prod_val = np.sum(log_kernel, axis=-1)
-        prod_val = np.exp(log_prod_val) / np.prod(h)
-
-        # Zero out values that are outside support
-        return np.where(out_of_bounds, 0.0, prod_val)
+        vals = 0.5 * np.exp(-abs_u / np.sqrt(2)) * np.sin(abs_u / np.sqrt(2) + np.pi / 4)
+        return np.where(np.isclose(u, 0.0), 0.5, vals)
 
     def kf_multivar(self, u):
         """
-        Multivariate Silverman kernel – safe for high dimensional data.
+        Multivariate Silverman kernel: product of per-dimension shape
+        values (evaluated on raw `u`, not rescaled), normalised by
+        prod(h). The kernel has infinite support (no clipping); like its
+        univariate form it can be slightly negative in the oscillating
+        tails.
         """
-        h = np.array(self.h)
-        u = np.array(u)
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_vec.size == 1:
+            h_vec = np.full(u.size, h_vec[0])
 
-        # ----- 1. Clip to support (dimension‑safe) -------------------------
-        base = self._clip_to_support(u, h)
-
-        # ----- 2. Bandwidth handling ---------------------------------------
-        if len(self.h) == 1 or np.allclose(self.h, self.h[0]):
-            h_scalar = self.h[0] if isinstance(self.h, (list, np.ndarray)) else self.h
-            denom = h_scalar ** u.shape[-1]
-        else:
-            if hasattr(self, "_cov") and self._cov is not None:
-                var_diag = np.sqrt(np.diag(self._cov))
-                scaled_h = np.array(self.h) * var_diag
-                denom = np.prod(scaled_h)
-            else:
-                denom = np.prod(self.h)
-
-        return base / denom
+        vals = self._clip_to_support(u, h_vec)
+        return float(np.prod(vals) / np.prod(h_vec))
 
 
 class Sigmoid(Kernel):
@@ -1675,33 +1763,35 @@ class Sigmoid(Kernel):
         Returns
         -------
         float or np.ndarray
-            Kernel evaluation: ``(2/π) / cosh(u)``.
+            Kernel density: ``(2/π) * sech(u/h) / h``.
         """
-        return (2 / np.pi) * 1 / np.cosh(u)
+        h = float(np.atleast_1d(np.asarray(self.h, dtype=float))[0]) if self.h is not None else 1.0
+        return (2 / np.pi) * 1 / np.cosh(np.asarray(u, dtype=float) / h) / h
 
     def kf_multivar(self, u):
-        """Multivariate sigmoid kernel.
+        """Multivariate sigmoid kernel (product of per-dimension kernels,
+        each evaluated at u_j/h_j and normalised by h_j).
+
+        The kernel has infinite support, so no boundedness clipping is
+        applied. Computation runs in log-space for numerical stability.
 
         Parameters
         ----------
         u : np.ndarray
-            Input vector(s).  If ``self._cov`` is set, `u` is first
-            transformed into decorrelated space using the inverse of the
-            covariance matrix.
+            Input vector.
 
         Returns
         -------
-        float or np.ndarray
-            Kernel evaluation normalised by the product of bandwidths,
-            then passed through :py:meth:`Kernel.bounded`.
+        float
+            Kernel density value.
         """
-        # Transform to decorrelated space if anisotropic covariance is provided
-        if getattr(self, "_cov", None) is not None:
-            u = np.linalg.solve(self._cov, u)
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_vec.size == 1:
+            h_vec = np.full(u.size, h_vec[0])
         # Compute log‑sum for numerical stability
-        log_k = np.sum(np.log(2 / np.pi) - np.log(np.cosh(u)))
-        k = np.exp(log_k) / np.prod(self.h)
-        return self.bounded(k, np.prod(u))
+        log_k = np.sum(np.log(2 / np.pi) - np.logaddexp(u, -u) + np.log(2.0) - np.log(h_vec))
+        return float(np.exp(log_k))
 
 
 class Biweight(Kernel):
@@ -1755,40 +1845,46 @@ class Biweight(Kernel):
         Parameters
         ----------
         u : float or array-like
-            Normalized distance from the target point (|u| ≤ 1).
+            Distance from the target point.
 
         Returns
         -------
         float or ndarray
-            Kernel value clipped to the support.
+            Kernel density value, zero outside |u| <= h.
         """
-        return self.bounded((15 / 16) * (1 - u**2) ** 2, u)
+        u_val = float(np.atleast_1d(np.asarray(u, dtype=float)).ravel()[0])
+        return self.bounded((15 / 16) * (1 - u_val**2) ** 2, u)
 
     def kf_multivar(self, u):
         """Multivariate biweight kernel with optional anisotropic support.
 
-        Parameters
-        ----------
-        u : array-like
-            Normalized distance vector from the target point.  If an
-            anisotropic covariance matrix ``self._cov`` is present,
-            `u` should already be scaled by the inverse square‑root of
-            that matrix (i.e., Mahalanobis distance).
-
-        Returns
-        -------
-        float or ndarray
-            Kernel value clipped to the support.
+        Isotropic/diagonal case: product of per-dimension biweight shape
+        terms evaluated directly on `u` (support |u_j| <= h_j), normalised
+        by prod(h). When a positive-definite covariance matrix ``self._cov``
+        is present the bandwidth is ignored in favor of the natural unit-ball
+        support (|u_j| < 1), normalised by the Jacobian 1/sqrt(det Σ).
         """
-        # Isotropic case
-        if not hasattr(self, "_cov") or self._cov is None:
-            return self.bounded(np.prod((15 / 16) * (1 - u**2) ** 2) / np.prod(self.h), np.prod(u))
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        d = u.size
 
-        # Anisotropic case: use the covariance determinant
-        d = len(u)
-        det_cov_sqrt = np.sqrt(np.linalg.det(self._cov))
-        kernel_val = ((15 / 16) ** d) * np.prod((1 - u**2) ** 2) / det_cov_sqrt
-        return self.bounded(kernel_val, np.linalg.norm(u))
+        # Anisotropic case: use the covariance determinant as a Jacobian
+        if hasattr(self, "_cov") and self._cov is not None:
+            try:
+                L = np.linalg.cholesky(self._cov)
+                det_cov_sqrt = np.prod(np.diag(L))
+                if np.any(np.abs(u) >= 1.0):
+                    return 0.0
+                return float(((15 / 16) ** d) * np.prod((1 - u**2) ** 2) / det_cov_sqrt)
+            except np.linalg.LinAlgError:
+                pass
+
+        # Isotropic case
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_vec.size == 1:
+            h_vec = np.full(d, h_vec[0])
+        if np.any(np.abs(u) >= h_vec):
+            return 0.0
+        return float(np.prod((15 / 16) * (1 - u**2) ** 2) / np.prod(h_vec))
 
 
 class Logistic(Kernel):
@@ -1848,7 +1944,8 @@ class Logistic(Kernel):
 
     def kf_univar(self, u):
         """
-        Univariate logistic kernel.
+        Univariate logistic kernel: K_h(u) = k(u/h)/h with
+        k(z) = 1/(exp(z) + 2 + exp(-z)).
 
         Parameters
         ----------
@@ -1858,38 +1955,38 @@ class Logistic(Kernel):
         Returns
         -------
         float or np.ndarray
-            Kernel value(s).
+            Kernel density value(s).
         """
-        return 1 / (np.exp(u) + 2 + np.exp(-u))
+        h = float(np.atleast_1d(np.asarray(self.h, dtype=float))[0]) if self.h is not None else 1.0
+        z = np.asarray(u, dtype=float) / h
+        return 1 / (np.exp(z) + 2 + np.exp(-z)) / h
 
     def kf_multivar(self, u):
         """
-        Multivariate logistic kernel with optional covariance scaling.
+        Multivariate logistic kernel (product of per-dimension kernels,
+        each evaluated at u_j/h_j and normalised by h_j).
 
         Parameters
         ----------
         u : np.ndarray
-            Input array of shape (..., d), where `d` is the dimensionality.
+            Input array of shape (d,), where `d` is the dimensionality.
 
         Returns
         -------
-        float or np.ndarray
-            Kernel value(s) normalised by bandwidth product.
+        float
+            Kernel density value.
         """
-        # Detect isotropic bandwidth: all elements equal or single value
-        if len(self.h) == 1 or np.allclose(self.h, self.h[0]):
-            h_scalar = self.h[0] if isinstance(self.h, (list, np.ndarray)) else self.h
-            denom = h_scalar ** u.shape[-1]  # d-dimensional product
-        else:
-            # Anisotropic case – optionally scale by covariance variances
-            if hasattr(self, "_cov") and self._cov is not None:
-                var_diag = np.sqrt(np.diag(self._cov))
-                scaled_h = np.array(self.h) * var_diag
-                denom = np.prod(scaled_h)
-            else:
-                denom = np.prod(self.h)
-
-        return np.prod(1 / (np.exp(u) + 2 + np.exp(-u))) / denom
+        u = np.atleast_1d(np.asarray(u, dtype=float)).ravel()
+        h_vec = np.atleast_1d(np.asarray(self.h, dtype=float))
+        if h_vec.size == 1:
+            h_vec = np.full(u.size, h_vec[0])
+        # Anisotropic: when a covariance matrix is available, scale each
+        # dimension's bandwidth by its standard deviation before normalising.
+        if hasattr(self, "_cov") and self._cov is not None:
+            var_diag = np.sqrt(np.diag(np.asarray(self._cov, dtype=float)))
+            h_vec = h_vec * var_diag
+        shape = 1.0 / (np.exp(u) + 2 + np.exp(-u))
+        return float(np.prod(shape) / np.prod(h_vec))
 
 
 class GaussianRBF(Kernel):
@@ -2434,7 +2531,7 @@ class MixtureGaussian(Kernel):
         )
 
         if mu is None:
-            mu = np.zeros((len(data), len(self.h)))
+            mu = np.zeros((self._ns, self._nd))
         self.mu = np.asarray(mu)
         self.n_components, self._nd = self.mu.shape
 

@@ -61,17 +61,14 @@ def test_multivar_high_dimensional():
 
 
 def test_anisotropic_transformation():
-    """When a full covariance matrix is supplied, the input vector is transformed."""
+    """`kf_multivar` is the product of per-dimension shape values (on raw
+    `u`) normalised by prod(h); a manually-injected `_cov` does not change
+    that (the kernel has infinite support, so there is nothing to whiten)."""
     cov = np.array([[2.0, 0.5], [0.5, 1.0]])
     kernel = Silverman(data=np.random.randn(10, 2), h=[1.0, 0.1])
     kernel._cov = cov  # manually inject covariance
 
     u = np.array([1.0, 0.0])
 
-    # Compute the transformed vector explicitly
-    var_diag = np.sqrt(np.diag(cov))
-    scaled_h = np.array(kernel.h) * var_diag
-    denom = np.prod(scaled_h)
-
-    expected = kernel._clip_to_support(u, kernel.h) / denom
+    expected = np.prod(kernel._clip_to_support(u, kernel.h)) / np.prod(kernel.h)
     assert np.isclose(kernel.kf_multivar(u), expected)
