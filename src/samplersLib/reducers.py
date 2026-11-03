@@ -42,7 +42,11 @@ import numpy as np
 #:   directionally-relevant structure when the good/bad point cloud isn't
 #:   evenly spread across dimensions, at the cost of being more sensitive
 #:   to per-dimension scale than PCA's correlation-based decomposition.
-METHODS = ("pca", "pod")
+#: - "random": a random orthonormal basis (QR of a Gaussian matrix drawn
+#:   from `seed`), applied to the same mean-centered data as "pod". It
+#:   ignores the data entirely and serves as an ablation baseline for the
+#:   learned subspaces above.
+METHODS = ("pca", "pod", "random")
 
 
 class Reducers:
@@ -80,7 +84,7 @@ class Reducers:
         """
         self.data_scaled = (self.data - self.var_limits[:, 0]) / (self.var_limits[:, 1] - self.var_limits[:, 0])
         self.means = np.mean(self.data_scaled, axis=0)
-        if self.method == "pod":
+        if self.method in ("pod", "random"):
             self.std_devs = np.ones_like(self.means)
         else:
             self.std_devs = np.std(self.data_scaled, axis=0)
@@ -105,6 +109,10 @@ class Reducers:
             # the (mean-centered) snapshot matrix.
             _, _, vt = np.linalg.svd(self.data_standardized, full_matrices=False)
             self.eigenvectors_top_k = vt[: self.k, :].T
+        elif self.method == "random":
+            rng = np.random.default_rng(seed=self.seed)
+            q, _ = np.linalg.qr(rng.standard_normal((self.data_standardized.shape[1], self.k)))
+            self.eigenvectors_top_k = q
         else:
             cov_matrix = np.cov(self.data_standardized, rowvar=False)
             eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
@@ -124,15 +132,99 @@ class Reducers:
         Inverts every step of `standardize_data`/`rd`: un-rotate via the
         PCA/POD basis, then undo the standardization (`* std_devs + means`
         - a no-op multiplication for `method == "pod"`, since `std_devs` is
-        all ones there), then undo the min-max scaling against `var_limits`.
+        all ones there), then undo the min-max scaling against `var_limits`,
+        and finally clip to `var_limits`: the lifted point can fall outside
+        the box even when its reduced coordinates lie inside the range of
+        the reduced data.
         """
         standardized = samples.dot(self.eigenvectors_top_k.T)
         scaled = standardized * self.std_devs + self.means
-        return scaled * (self.var_limits[:, 1] - self.var_limits[:, 0]) + self.var_limits[:, 0]
+        lifted = scaled * (self.var_limits[:, 1] - self.var_limits[:, 0]) + self.var_limits[:, 0]
+        return np.clip(lifted, self.var_limits[:, 0], self.var_limits[:, 1])
+
+    def displace_in_original_space(self, samples: np.ndarray, base_reduced: np.ndarray, base_original: np.ndarray):
+        """
+        Lift reduced-space samples as displacements from known full-space
+        points: ``base_original + L (samples - base_reduced)``, where ``L`` is
+        the linear part of `project_rd_to_original_space`, then clip to
+        `var_limits`.
+
+        Unlike `project_rd_to_original_space`, which maps every sample onto
+        the k-dimensional affine set through the data mean, this keeps the
+        `D - k` components of each base point that the reduction discards,
+        so a sample equal to its base point lifts back to that point exactly.
+        Row ``i`` of `base_reduced`/`base_original` is the base of row ``i``
+        of `samples`.
+        """
+        delta = (np.atleast_2d(samples) - np.atleast_2d(base_reduced)).dot(self.eigenvectors_top_k.T)
+        lifted = np.atleast_2d(base_original) + delta * self.std_devs * (self.var_limits[:, 1] - self.var_limits[:, 0])
+        return np.clip(lifted, self.var_limits[:, 0], self.var_limits[:, 1])
+
+    def to_standardized(self, points: np.ndarray):
+        """
+        Map original-space points to the standardized coordinates the basis
+        lives in (min-max scaling, centering, and - for PCA - division by
+        the per-dimension std-dev). Dimensions with zero spread are only
+        centered.
+        """
+        scaled = (np.atleast_2d(points) - self.var_limits[:, 0]) / (self.var_limits[:, 1] - self.var_limits[:, 0])
+        return (scaled - self.means) / np.where(self.std_devs > 0, self.std_devs, 1.0)
+
+    def from_standardized(self, standardized: np.ndarray):
+        """Inverse of `to_standardized`, clipped to `var_limits`."""
+        scaled = np.atleast_2d(standardized) * self.std_devs + self.means
+        lifted = scaled * (self.var_limits[:, 1] - self.var_limits[:, 0]) + self.var_limits[:, 0]
+        return np.clip(lifted, self.var_limits[:, 0], self.var_limits[:, 1])
+
+    def residual_lift(
+        self,
+        samples: np.ndarray,
+        base_reduced: np.ndarray,
+        base_original: np.ndarray,
+        good_original: np.ndarray,
+        rng: np.random.Generator = None,
+        noise_scale: float = 1.0,
+    ):
+        """
+        Residual-preserving lift with exploration in the discarded directions.
+
+        In standardized coordinates, with ``V`` the retained basis and
+        ``u_j`` the base point of a sample ``y'`` (whose reduced coordinates
+        are ``y_j``)::
+
+            u' = u_j + V (y' - y_j) + (I - V V^T) eta,   eta ~ N(0, diag(sigma^2))
+
+        The first term keeps all of the base point, including the ``D - k``
+        components the reduction discards; the second applies the
+        reduced-space move unchanged; the third explores the discarded
+        directions. ``sigma`` is the per-dimension spread of the good points'
+        residuals ``(I - V V^T) u`` shrunk by Scott's univariate factor
+        ``|G|^(-1/5)`` and multiplied by `noise_scale`.
+
+        Since the third term is orthogonal to ``V``, projecting the result
+        back gives exactly ``y'`` (before clipping to `var_limits`), so a
+        score computed on ``y'`` is the score of the lifted point; and with
+        ``y' = y_j`` and ``noise_scale = 0`` the base point is returned
+        unchanged.
+        """
+        V = self.eigenvectors_top_k
+        rng = np.random.default_rng() if rng is None else rng
+        u_base = self.to_standardized(base_original)
+        u_new = u_base + (np.atleast_2d(samples) - np.atleast_2d(base_reduced)).dot(V.T)
+
+        u_good = self.to_standardized(good_original)
+        if u_good.shape[0] > 1 and noise_scale != 0:
+            residuals = u_good - u_good.dot(V).dot(V.T)
+            sigma = residuals.std(axis=0) * u_good.shape[0] ** (-1 / 5) * noise_scale
+            eta = rng.standard_normal(u_new.shape) * sigma
+            u_new = u_new + eta - eta.dot(V).dot(V.T)
+        return self.from_standardized(u_new)
 
     @classmethod
-    def reduce(self, data: np.ndarray, vlim: np.ndarray, nd: int, n_components: int = 3, method: str = "pca"):
-        red = Reducers(data=data, vlim=vlim, nd=nd, n_components=n_components, method=method)
+    def reduce(
+        self, data: np.ndarray, vlim: np.ndarray, nd: int, n_components: int = 3, method: str = "pca", seed: int = 12345
+    ):
+        red = Reducers(data=data, vlim=vlim, nd=nd, n_components=n_components, method=method, seed=seed)
         return red.rd()
 
     @classmethod
@@ -144,13 +236,32 @@ class Reducers:
         nd: int,
         n_components: int = 3,
         method: str = "pca",
+        seed: int = 12345,
+        base_reduced: np.ndarray = None,
+        base_original: np.ndarray = None,
+        lift: str = None,
+        good_original: np.ndarray = None,
+        noise_seed: int = None,
+        noise_scale: float = 1.0,
     ):
-        # `n_components`/`method` must match the values used to build
+        # `n_components`/`method`/`seed` must match the values used to build
         # `samples` in the first place (i.e. the `reduce(...)` call this is
         # inverting) - otherwise the re-derived basis has the wrong shape,
         # or the wrong basis entirely, for `samples.dot(eigenvectors_top_k.T)`.
-        red = Reducers(data=original_data, vlim=vlim, nd=nd, n_components=n_components, method=method)
+        red = Reducers(data=original_data, vlim=vlim, nd=nd, n_components=n_components, method=method, seed=seed)
         red.rd()
+        # `lift` selects the back-mapping: "mean" (`project_rd_to_original_space`),
+        # "anchored" (`displace_in_original_space`) or "residual"
+        # (`residual_lift`, which also needs `good_original`). When omitted,
+        # it is "anchored" if base points are given and "mean" otherwise.
+        if lift is None:
+            lift = "anchored" if base_reduced is not None and base_original is not None else "mean"
+        if lift == "residual":
+            return red.residual_lift(
+                samples, base_reduced, base_original, good_original, np.random.default_rng(noise_seed), noise_scale
+            )
+        if lift == "anchored":
+            return red.displace_in_original_space(samples, base_reduced, base_original)
         return red.project_rd_to_original_space(samples=samples)
 
 

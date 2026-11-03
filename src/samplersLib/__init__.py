@@ -24,6 +24,6 @@
 # ------------------------------------------------------------------------------------#
 """
 
-from samplersLib import kernels, samplers
+from samplersLib import hybrid, kernels, samplers
 
-__all__ = ["samplers", "kernels"]
+__all__ = ["samplers", "kernels", "hybrid"]
